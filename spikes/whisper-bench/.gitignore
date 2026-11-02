@@ -1,0 +1,6 @@
+# Large or generated benchmark inputs and outputs stay local.
+/target/
+/models/
+/audio/
+/out/
+__pycache__/
