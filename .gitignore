@@ -1,0 +1,47 @@
+# Rust build output (any crate, including standalone spikes)
+target/
+
+# Speech and ML model weights (whisper.cpp ggml/gguf, ONNX, ...)
+models/
+*.bin
+*.gguf
+*.ggml
+*.onnx
+*.safetensors
+*.pt
+*.pth
+*.ckpt
+
+# Raw footage and rendered media
+raw/
+*.mp4
+*.m4v
+*.mov
+*.mkv
+*.webm
+*.avi
+*.3gp
+*.mts
+*.m2ts
+*.wav
+*.mp3
+*.m4a
+*.aac
+*.flac
+*.ogg
+*.oga
+*.opus
+*.amr
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Editor and OS clutter
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db

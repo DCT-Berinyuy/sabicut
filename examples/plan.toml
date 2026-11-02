@@ -1,0 +1,51 @@
+#:schema ../schema/v1.json
+# An example Sabicut edit plan (schema v1). Try:
+#   cargo run -- validate examples/plan.toml
+#   cargo run -- timeline examples/plan.toml
+# Paths are relative to this file. The clips, word timings, and font are not part of
+# the repository, so only `validate` and `timeline` work on this example.
+
+schema = 1
+
+[meta]
+fps = 30
+out = { w = 1080, h = 1920 }
+
+[[source]]
+id = "a"
+path = "raw/IMG_0412.mov"
+crop_x = 0.42                       # centre of the 9:16 window, 0–1
+
+[[source]]
+id = "b"
+path = "raw/IMG_0415.mov"
+crop_x = 0.5
+
+[[cut]]
+src = "a"
+in = 3.120
+out = 9.880
+zoom = [{ at = 5.4, scale = 1.25 }] # `at` is in source time
+
+[[cut]]
+src = "a"
+in = 12.0
+out = 15.5
+zoom = [{ at = 13.0, scale = 1.15 }, { at = 14.2, scale = 1.0 }]
+
+[[cut]]
+src = "b"
+in = 0.5
+out = 4.0
+
+[hook]
+text = "Stop leaking your API keys"
+dur = 2.0
+
+[captions]
+words = "words.json"
+fixes = "fixes.toml"
+keywords = ["Rust", "Supabase"]
+font = "fonts/Anton-Regular.ttf"
+active = "#FFC400"
+stroke = 10
