@@ -1,0 +1,26 @@
+[workspace]
+resolver = "3"
+members = ["crates/core", "crates/cli"]
+# Throwaway experiments (e.g. spikes/whisper-bench) are standalone crates.
+exclude = ["spikes"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+authors = ["Verla Berinyuy Ndey"]
+repository = "https://github.com/DCT-Berinyuy/sabicut"
+homepage = "https://github.com/DCT-Berinyuy/sabicut"
+keywords = ["video", "captions", "shorts", "offline"]
+categories = ["multimedia::video"]
+
+[workspace.dependencies]
+sabicut-core = { path = "crates/core", version = "0.1.0" }
+clap = { version = "4.6.7", features = ["derive"] }
+schemars = "1.2.3"
+serde = { version = "1.0.229", features = ["derive"] }
+thiserror = "2.0.21"
+toml = "1.1.8"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"

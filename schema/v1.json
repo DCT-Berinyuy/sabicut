@@ -1,0 +1,264 @@
+{
+  "$defs": {
+    "Captions": {
+      "additionalProperties": false,
+      "description": "Word-by-word caption settings.",
+      "properties": {
+        "active": {
+          "description": "Colour of the word being spoken and of keywords, as #RRGGBB.",
+          "pattern": "^#[0-9A-Fa-f]{6}$",
+          "type": "string"
+        },
+        "fixes": {
+          "description": "Replacement rules applied to the words (fixes.toml).",
+          "minLength": 1,
+          "type": "string"
+        },
+        "font": {
+          "description": "Caption font file.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "keywords": {
+          "description": "Words that are always drawn in the active colour.",
+          "items": {
+            "pattern": "\\S",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "stroke": {
+          "description": "Outline width around caption text, in output pixels.",
+          "format": "uint32",
+          "maximum": 64,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "words": {
+          "description": "Word timings file (words.json).",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "words",
+        "font",
+        "active",
+        "stroke"
+      ],
+      "type": "object"
+    },
+    "Cut": {
+      "additionalProperties": false,
+      "description": "A range of one source clip that is kept in the output.",
+      "properties": {
+        "in": {
+          "description": "Start of the range, in seconds of source time.",
+          "format": "double",
+          "maximum": 86400.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "out": {
+          "description": "End of the range, in seconds of source time. Must be greater than in.",
+          "format": "double",
+          "maximum": 86400.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "src": {
+          "description": "Id of the source clip.",
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "type": "string"
+        },
+        "zoom": {
+          "description": "Punch-in zooms within this cut, in increasing order of at, at least 1 frame apart.",
+          "items": {
+            "$ref": "#/$defs/Zoom"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "src",
+        "in",
+        "out"
+      ],
+      "type": "object"
+    },
+    "Hook": {
+      "additionalProperties": false,
+      "description": "Hook text shown over the opening seconds of the output.",
+      "properties": {
+        "dur": {
+          "description": "How long the hook stays on screen, in seconds from the start of the output.\nAt most the length of the output.",
+          "exclusiveMinimum": 0,
+          "format": "double",
+          "maximum": 86400.0,
+          "type": "number"
+        },
+        "text": {
+          "description": "The hook line, for example \"Stop leaking your API keys\".",
+          "pattern": "\\S",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "dur"
+      ],
+      "type": "object"
+    },
+    "Meta": {
+      "additionalProperties": false,
+      "description": "Output video settings.",
+      "properties": {
+        "fps": {
+          "description": "Output frame rate in frames per second. Every cut is trimmed to a whole number\nof frames at this rate.",
+          "format": "uint32",
+          "maximum": 240,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "out": {
+          "$ref": "#/$defs/OutputSize",
+          "description": "Output frame size in pixels."
+        }
+      },
+      "required": [
+        "fps",
+        "out"
+      ],
+      "type": "object"
+    },
+    "OutputSize": {
+      "additionalProperties": false,
+      "description": "Output frame size in pixels. Both sides must be even.",
+      "properties": {
+        "h": {
+          "description": "Height in pixels.",
+          "format": "uint32",
+          "maximum": 8192,
+          "minimum": 2,
+          "multipleOf": 2,
+          "type": "integer"
+        },
+        "w": {
+          "description": "Width in pixels.",
+          "format": "uint32",
+          "maximum": 8192,
+          "minimum": 2,
+          "multipleOf": 2,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "w",
+        "h"
+      ],
+      "type": "object"
+    },
+    "Source": {
+      "additionalProperties": false,
+      "description": "One source clip.",
+      "properties": {
+        "crop_x": {
+          "description": "Horizontal centre of the 9:16 crop window, from 0 (left edge) to 1 (right edge).",
+          "format": "double",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "id": {
+          "description": "Short name that cuts use to refer to this clip: 1 to 64 letters, digits,\nunderscores, or hyphens.",
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "type": "string"
+        },
+        "path": {
+          "description": "Path to the clip file.",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "path",
+        "crop_x"
+      ],
+      "type": "object"
+    },
+    "Zoom": {
+      "additionalProperties": false,
+      "description": "A punch-in zoom.",
+      "properties": {
+        "at": {
+          "description": "When the zoom starts, in seconds of source time (not output time). Must be\ninside the cut (in <= at < out) and at least 1 frame before out.",
+          "format": "double",
+          "maximum": 86400.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "scale": {
+          "description": "Zoom factor, from 1 (no zoom) to 4.",
+          "format": "double",
+          "maximum": 4.0,
+          "minimum": 1.0,
+          "type": "number"
+        }
+      },
+      "required": [
+        "at",
+        "scale"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A hand-editable description of one short video: the source clips, the ranges kept\nfrom them, and how the result is captioned. Output timing is derived from the cuts\nand never stored. Relative paths are resolved from the plan file's directory.",
+  "properties": {
+    "captions": {
+      "$ref": "#/$defs/Captions",
+      "description": "Word-by-word caption settings."
+    },
+    "cut": {
+      "description": "Ranges kept from the sources, in output order.",
+      "items": {
+        "$ref": "#/$defs/Cut"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "hook": {
+      "$ref": "#/$defs/Hook",
+      "description": "Hook text shown over the opening seconds."
+    },
+    "meta": {
+      "$ref": "#/$defs/Meta",
+      "description": "Output video settings."
+    },
+    "schema": {
+      "const": 1,
+      "description": "Plan format version. Always 1 for this schema.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "source": {
+      "description": "Source clips. Cuts refer to them by id.",
+      "items": {
+        "$ref": "#/$defs/Source"
+      },
+      "minItems": 1,
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema",
+    "meta",
+    "source",
+    "cut"
+  ],
+  "title": "Sabicut edit plan (schema v1)",
+  "type": "object"
+}
