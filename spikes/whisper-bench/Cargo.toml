@@ -1,0 +1,14 @@
+[package]
+name = "whisper-bench"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+description = "Sabicut day-one benchmark: whisper.cpp speed, peak RSS and word timestamps for tiny/base/small q5_1"
+
+[dependencies]
+hound = "3.5"
+whisper-rs = "0.16"
+
+# Standalone spike: an empty workspace table keeps it out of the main Sabicut workspace.
+[workspace]
