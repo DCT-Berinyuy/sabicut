@@ -32,6 +32,8 @@ raw/
 *.oga
 *.opus
 *.amr
+# ...except the tiny public-domain clips that the transcription tests use
+!crates/analyze/tests/fixtures/*.opus
 
 # Local environment and secrets
 .env

@@ -1,5 +1,7 @@
 //! Sabicut's core: the `plan.toml` schema v1, its validation, exact rational time,
-//! and the output timeline derived from a plan's cuts.
+//! and the output timeline derived from a plan's cuts. It also defines the word
+//! timings file (`words.json`, [`Transcript`]) and the transcript fixes
+//! (`fixes.toml`, [`Fixes`], [`apply_fixes`]), with no dependency on a speech model.
 //!
 //! ```
 //! use sabicut_core::{Plan, Timeline};
@@ -41,10 +43,13 @@
     clippy::indexing_slicing
 )]
 
+mod fixes;
 mod plan;
 mod rational;
+mod schema_gen;
 mod timeline;
 mod validate;
+mod words;
 
 pub use plan::{
     Captions, Cut, Hook, Meta, OutputSize, ParseError, Plan, SCHEMA_VERSION, Source, Zoom,
@@ -53,15 +58,16 @@ pub use rational::Rational;
 pub use timeline::{Landing, Segment, SourceMapping, Timeline, ZoomEvent};
 pub use validate::{ValidationError, ValidationErrors};
 
+pub use fixes::{
+    FIXES_SCHEMA_VERSION, Fix, FixChange, FixError, Fixed, Fixes, FixesParseError, apply_fixes,
+};
+pub use words::{SpeechSegment, Transcript, TranscriptParseError, WORDS_SCHEMA_VERSION, Word};
+
 /// The JSON Schema of `plan.toml` schema v1, pretty-printed with a trailing newline.
 ///
 /// It is generated from the [`Plan`] types and is exactly the content of the
 /// repository's `schema/v1.json`. TOML has no null, so optional keys are described by
 /// their value type and are simply not listed as required.
 pub fn json_schema() -> String {
-    let generator = schemars::generate::SchemaSettings::draft2020_12().into_generator();
-    format!(
-        "{:#}\n",
-        generator.into_root_schema_for::<Plan>().as_value()
-    )
+    schema_gen::pretty::<Plan>()
 }

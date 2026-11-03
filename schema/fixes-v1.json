@@ -1,0 +1,53 @@
+{
+  "$defs": {
+    "Fix": {
+      "additionalProperties": false,
+      "description": "One replacement rule.",
+      "properties": {
+        "case_sensitive": {
+          "description": "Match capitals exactly. By default \"supa base\" also matches \"Supa Base\".",
+          "type": "boolean"
+        },
+        "from": {
+          "description": "The words to find, like \"Supa base\". Only whole words match, and punctuation\naround them is ignored. At most 32 words.",
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "to": {
+          "description": "What to write instead, like \"Supabase\". If it has as many words as `from`, each\nword keeps its own timing. Otherwise the matched words become one word that runs\nfrom the start of the first to the end of the last.",
+          "pattern": "\\S",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Replacement rules for words the speech model gets wrong, such as names and brands.\nThey are applied whenever words.json is read, so they survive a new transcription.\nA rule matches whole words, ignores capitals unless it says otherwise, and keeps\nthe punctuation around the words. Where rules overlap, the one that matches more\nwords wins. Rules are applied again until nothing changes, so applying them twice\ngives the same result as applying them once.",
+  "properties": {
+    "fix": {
+      "description": "The replacement rules.",
+      "items": {
+        "$ref": "#/$defs/Fix"
+      },
+      "type": "array"
+    },
+    "schema": {
+      "const": 1,
+      "description": "Format version. Always 1 for this schema.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "schema"
+  ],
+  "title": "Sabicut transcript fixes (fixes.toml, schema v1)",
+  "type": "object"
+}

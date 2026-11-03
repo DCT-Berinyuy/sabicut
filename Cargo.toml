@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/cli"]
+members = ["crates/*"]
 # Throwaway experiments (e.g. spikes/whisper-bench) are standalone crates.
 exclude = ["spikes"]
 
@@ -16,11 +16,14 @@ categories = ["multimedia::video"]
 
 [workspace.dependencies]
 sabicut-core = { path = "crates/core", version = "0.1.0" }
+sabicut-analyze = { path = "crates/analyze", version = "0.1.0" }
 clap = { version = "4.6.7", features = ["derive"] }
 schemars = "1.2.3"
 serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
 thiserror = "2.0.21"
 toml = "1.1.8"
+whisper-rs = "0.16.0"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

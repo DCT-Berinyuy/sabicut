@@ -1,4 +1,9 @@
-//! `sabicut`: validate edit plans and inspect the output timeline they produce.
+//! `sabicut`: validate edit plans and inspect the output timeline they produce,
+//! transcribe speech to word timings, and apply transcript fixes.
+
+mod analyze;
+mod files;
+mod fix;
 
 use std::fmt::Display;
 use std::fs::File;
@@ -6,8 +11,8 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use clap::{Parser, Subcommand};
-use sabicut_core::{ParseError, Plan, Timeline, ValidationErrors};
+use clap::{Parser, Subcommand, ValueEnum};
+use sabicut_core::{Fixes, ParseError, Plan, Timeline, Transcript, ValidationErrors};
 
 /// Plans are small text files; anything bigger is almost certainly the wrong file.
 const MAX_PLAN_BYTES: usize = 16 * 1024 * 1024;
@@ -15,7 +20,8 @@ const MAX_PLAN_BYTES: usize = 16 * 1024 * 1024;
 /// Sabicut, an offline video studio for communities.
 ///
 /// This version works with edit plans (plan.toml): it validates them, prints their
-/// JSON Schema, and prints the output timeline they produce.
+/// JSON Schema, and prints the output timeline they produce. It also transcribes
+/// speech to word timings (words.json) and applies transcript fixes (fixes.toml).
 #[derive(Debug, Parser)]
 #[command(name = "sabicut", version)]
 struct Cli {
@@ -30,13 +36,31 @@ enum Command {
         /// Path to the plan file
         plan: PathBuf,
     },
-    /// Print the JSON Schema of plan.toml (schema v1)
-    Schema,
+    /// Print the JSON Schema of a file format (plan.toml by default)
+    Schema {
+        /// Which file format
+        #[arg(value_enum, default_value_t = SchemaFormat::Plan)]
+        format: SchemaFormat,
+    },
     /// Print the output timeline derived from a plan's cuts
     Timeline {
         /// Path to the plan file
         plan: PathBuf,
     },
+    /// Transcribe the speech in a video or audio file to word timings (words.json)
+    Analyze(analyze::AnalyzeArgs),
+    /// Apply transcript fixes (fixes.toml) to word timings and show what changes
+    Fix(fix::FixArgs),
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum SchemaFormat {
+    /// Edit plans, plan.toml (schema v1)
+    Plan,
+    /// Word timings, words.json (schema v1)
+    Words,
+    /// Transcript fixes, fixes.toml (schema v1)
+    Fixes,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -54,6 +78,10 @@ enum CliError {
     },
     #[error("cannot write output: {0}")]
     Write(#[from] io::Error),
+    #[error(transparent)]
+    Analyze(#[from] analyze::Error),
+    #[error(transparent)]
+    Fix(#[from] fix::Error),
 }
 
 fn main() -> ExitCode {
@@ -85,11 +113,20 @@ fn run(command: &Command) -> Result<(), CliError> {
                 timeline.fps(),
             )?;
         }
-        Command::Schema => out.write_all(sabicut_core::json_schema().as_bytes())?,
+        Command::Schema { format } => {
+            let schema = match format {
+                SchemaFormat::Plan => sabicut_core::json_schema(),
+                SchemaFormat::Words => Transcript::json_schema(),
+                SchemaFormat::Fixes => Fixes::json_schema(),
+            };
+            out.write_all(schema.as_bytes())?;
+        }
         Command::Timeline { plan } => {
             let timeline = load(plan)?;
             write_timeline(&mut out, plan, &timeline)?;
         }
+        Command::Analyze(args) => analyze::run(args, &mut out)?,
+        Command::Fix(args) => fix::run(args, &mut out)?,
     }
     out.flush()?;
     Ok(())

@@ -1,0 +1,20 @@
+[package]
+name = "sabicut-analyze"
+description = "Offline transcription for Sabicut: whisper.cpp with voice-activity detection, written as words.json"
+readme = "../../README.md"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories = ["multimedia::audio", "multimedia::video"]
+
+[dependencies]
+sabicut-core.workspace = true
+thiserror.workspace = true
+whisper-rs.workspace = true
+
+[lints]
+workspace = true

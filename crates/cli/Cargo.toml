@@ -1,6 +1,6 @@
 [package]
 name = "sabicut-cli"
-description = "The `sabicut` command: validate edit plans and print their output timeline"
+description = "The `sabicut` command: edit plans, transcription to word timings, and transcript fixes"
 readme = "../../README.md"
 version.workspace = true
 edition.workspace = true
@@ -17,6 +17,7 @@ path = "src/main.rs"
 
 [dependencies]
 sabicut-core.workspace = true
+sabicut-analyze.workspace = true
 clap.workspace = true
 thiserror.workspace = true
 
