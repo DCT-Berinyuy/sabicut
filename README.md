@@ -10,7 +10,8 @@ get finished videos back. No internet, no data cost, no app to install.
 
 ## Status
 
-**Pre-alpha and time-boxed.** Sabicut cannot make a video yet.
+**Pre-alpha and time-boxed.** Sabicut can turn a hand-written plan into a vertical short,
+but without captions yet.
 
 | Phase | Window | Exit criterion |
 |---|---|---|
@@ -20,9 +21,9 @@ get finished videos back. No internet, no data cost, no app to install.
 
 If a phase misses its exit criterion by more than a week, work stops for a review.
 
-What works today is the foundation that everything else builds on: the edit-plan format
-(`plan.toml`) and its commands, offline transcription to word timings (`words.json`), and
-transcript fixes (`fixes.toml`).
+What works today is the edit-plan format (`plan.toml`) and its commands, offline
+transcription to word timings (`words.json`), transcript fixes (`fixes.toml`), and
+previews and rendering of plans, without captions so far.
 
 | Command | What it does |
 |---|---|
@@ -31,8 +32,11 @@ transcript fixes (`fixes.toml`).
 | `sabicut timeline <plan.toml>` | Prints the output timeline derived from the plan's cuts, to the frame |
 | `sabicut analyze <media>` | Transcribes the speech in a video or audio file to word timings, offline |
 | `sabicut fix <words.json> <fixes.toml>` | Applies transcript fixes to word timings and lists what changes |
+| `sabicut preview <plan.toml> --at 1.5,8,22` | Writes PNG stills at those output times and a contact sheet, optionally with the apps' safe zones shaded |
+| `sabicut render <plan.toml>` | Renders a 1080×1920 MP4 (frame-exact cuts, crop, zooms, HDR tone mapping, cleaned-up audio at −14 LUFS) and a cover JPG |
 
-Automatic planning, previews, rendering, and the Wi-Fi hub come next.
+Captions, automatic planning, and the Wi-Fi hub come next. How rendering and previews
+work, including how zooms move, is in [docs/render.md](docs/render.md).
 The full plan is in the [product requirements document](docs/PRD.md).
 
 ## Build and run
@@ -40,8 +44,10 @@ The full plan is in the [product requirements document](docs/PRD.md).
 You need a recent stable Rust toolchain from [rustup](https://rustup.rs) (the code uses
 the 2024 edition). Building also compiles whisper.cpp, so you need CMake, a C and C++
 compiler, and libclang (on Debian and Ubuntu: `cmake`, `build-essential` and
-`libclang-dev`); the first build takes a few minutes. `sabicut analyze` runs `ffmpeg`, so
-install that too.
+`libclang-dev`); the first build takes a few minutes. `sabicut analyze`, `preview` and
+`render` run ffmpeg, so install that too: version 6.1 or newer with libx264, for
+example `sudo apt install ffmpeg` on Ubuntu 24.04 (see
+[docs/render.md](docs/render.md#what-you-need)).
 
 ```sh
 git clone https://github.com/DCT-Berinyuy/sabicut
@@ -233,6 +239,7 @@ With `--out fixed.json` (or `-o -` for standard output) it also writes the fixed
 crates/core/     sabicut-core: plan types, schema v1, validation, rational time, timeline,
                  words.json and fixes.toml (no dependency on the speech model)
 crates/analyze/  sabicut-analyze: ffmpeg audio, Silero speech detection, whisper.cpp
+crates/render/   sabicut-render: ffmpeg graph builder, render, preview stills
 crates/cli/      sabicut-cli: the `sabicut` command
 schema/          JSON Schemas of plan.toml (v1.json), words.json and fixes.toml,
                  generated from crates/core
@@ -251,9 +258,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-CI runs the same checks on every push to `main` and on every pull request. If you change
-the plan, words or fixes types, regenerate the committed schemas (a test fails until you
-do):
+The render tests need ffmpeg: they generate their test clips with it at run time, so no
+media is committed. CI runs the same checks on every push to `main` and on every pull
+request. If you change the plan, words or fixes types, regenerate the committed schemas (a
+test fails until you do):
 
 ```sh
 cargo run -p sabicut-cli -- schema > schema/v1.json

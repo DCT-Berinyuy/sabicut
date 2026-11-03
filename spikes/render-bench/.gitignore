@@ -1,0 +1,3 @@
+# Benchmark outputs stay local; the results are written up in docs/bench/render.md.
+/out/
+__pycache__/

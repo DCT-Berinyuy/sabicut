@@ -137,3 +137,149 @@ fn unknown_subcommands_are_usage_errors() {
     let output = sabicut(&["no-such-command", "examples/plan.toml"]);
     assert_eq!(output.status.code(), Some(2));
 }
+
+/// ffmpeg jobs are heavy, so the tests that render run one at a time.
+static FFMPEG_JOBS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn ffmpeg_binary() -> String {
+    std::env::var("SABICUT_FFMPEG").unwrap_or_else(|_| "ffmpeg".to_owned())
+}
+
+/// A fresh directory holding a 4 s 640×360 clip with a tone, and a plan that cuts two
+/// seconds from it with a relative path. Returns the plan's path.
+fn clip_and_plan(name: &str, extra: &str) -> PathBuf {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let status = Command::new(ffmpeg_binary())
+        .args(["-nostdin", "-hide_banner", "-loglevel", "error", "-y"])
+        .args(["-f", "lavfi", "-i", "testsrc2=s=640x360:r=30:d=4"])
+        .args(["-f", "lavfi", "-i", "sine=f=440:r=48000:d=4,volume=0.2"])
+        .args(["-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac"])
+        .arg(dir.join("clip.mp4"))
+        .status()
+        .unwrap();
+    assert!(status.success(), "ffmpeg could not make the test clip");
+    let plan = dir.join("plan.toml");
+    fs::write(
+        &plan,
+        format!(
+            "schema = 1\n[meta]\nfps = 30\nout = {{ w = 1080, h = 1920 }}\n[[source]]\nid = \"a\"\npath = \"clip.mp4\"\ncrop_x = 0.5\n[[cut]]\nsrc = \"a\"\nin = 0.5\nout = 1.5\n[[cut]]\nsrc = \"a\"\nin = 2.5\nout = 3.5\nzoom = [{{ at = 3.0, scale = 1.3 }}]\n{extra}"
+        ),
+    )
+    .unwrap();
+    plan
+}
+
+#[test]
+fn render_writes_the_video_and_cover() {
+    let _lock = FFMPEG_JOBS.lock().unwrap_or_else(|e| e.into_inner());
+    let plan = clip_and_plan("cli-render", "[hook]\ntext = \"Hi\"\ndur = 1.0\n");
+    let output = sabicut(&["render", plan.to_str().unwrap(), "--preset", "ultrafast"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let video = plan.with_extension("mp4");
+    let cover = plan.with_extension("jpg");
+    let out = stdout(&output);
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(lines.len(), 3, "{out}");
+    assert!(
+        lines[0].starts_with(&format!(
+            "ok: wrote {} (60 frames = 2.000 s at 30 fps, 1080x1920, -1",
+            video.display()
+        )),
+        "{out}"
+    );
+    assert!(lines[0].ends_with(" LUFS)"), "{out}");
+    assert_eq!(
+        lines[1],
+        format!("ok: wrote {} (cover: frame 30, 1.000 s)", cover.display())
+    );
+    assert_eq!(
+        lines[2],
+        "note: [hook] not drawn yet; captions and the hook come in a later version"
+    );
+    assert!(video.exists() && cover.exists());
+    assert!(
+        stderr(&output).starts_with("source a: "),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn preview_writes_stills_and_a_contact_sheet() {
+    let _lock = FFMPEG_JOBS.lock().unwrap_or_else(|e| e.into_inner());
+    let plan = clip_and_plan("cli-preview", "");
+    let output = sabicut(&[
+        "preview",
+        plan.to_str().unwrap(),
+        "--at",
+        "0.5,1.25",
+        "--safe-zones",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let dir = plan.parent().unwrap().join("plan-preview");
+    let expected = format!(
+        "ok: wrote {} (frame 15 at 0.500 s)\nok: wrote {} (frame 37 at 1.233 s)\nok: wrote {} (2 stills)\n",
+        dir.join("still-01-0.500s.png").display(),
+        dir.join("still-02-1.250s.png").display(),
+        dir.join("contact-sheet.png").display(),
+    );
+    assert_eq!(stdout(&output), expected);
+    for name in [
+        "still-01-0.500s.png",
+        "still-02-1.250s.png",
+        "contact-sheet.png",
+    ] {
+        assert!(dir.join(name).exists(), "{name}");
+    }
+}
+
+#[test]
+fn render_reports_a_missing_source() {
+    let plan = scratch_file(
+        "missing-source.toml",
+        "schema = 1\n[meta]\nfps = 30\nout = { w = 1080, h = 1920 }\n[[source]]\nid = \"a\"\npath = \"no-such-clip.mp4\"\ncrop_x = 0.5\n[[cut]]\nsrc = \"a\"\nin = 0.0\nout = 1.0\n",
+    );
+    let output = sabicut(&["render", plan.to_str().unwrap()]);
+    assert_eq!(output.status.code(), Some(1));
+    let message = stderr(&output);
+    assert!(message.starts_with("error: source `a` ("), "{message}");
+    assert!(message.contains("no-such-clip.mp4"), "{message}");
+}
+
+#[test]
+fn preview_rejects_a_time_past_the_end() {
+    let _lock = FFMPEG_JOBS.lock().unwrap_or_else(|e| e.into_inner());
+    let plan = clip_and_plan("cli-preview-range", "");
+    let output = sabicut(&["preview", plan.to_str().unwrap(), "--at", "1,9"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        stderr(&output),
+        "error: --at 9 s is not within the output (0 to 2.000 s)\n"
+    );
+}
+
+#[test]
+fn render_refuses_to_overwrite_a_source() {
+    let _lock = FFMPEG_JOBS.lock().unwrap_or_else(|e| e.into_inner());
+    let plan = clip_and_plan("cli-overwrite", "");
+    let clip = plan.with_file_name("clip.mp4");
+    let before = fs::metadata(&clip).unwrap().len();
+    let output = sabicut(&[
+        "render",
+        plan.to_str().unwrap(),
+        "-o",
+        clip.to_str().unwrap(),
+    ]);
+    assert_eq!(output.status.code(), Some(1));
+    let message = stderr(&output);
+    assert!(
+        message.ends_with(&format!(
+            "error: {} is source `a`; writing there would destroy it, so choose another output path\n",
+            clip.display()
+        )),
+        "{message}"
+    );
+    assert_eq!(fs::metadata(&clip).unwrap().len(), before);
+}

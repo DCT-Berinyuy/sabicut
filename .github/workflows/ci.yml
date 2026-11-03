@@ -31,5 +31,14 @@ jobs:
         run: cargo fmt --all --check
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # Rendering runs the ffmpeg binary (PRD §8); the tests make their clips with it.
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          ffmpeg -hide_banner -version | sed -n 1p
+          for filter in zscale tonemap zoompan loudnorm afftdn acompressor xstack drawbox setparams; do
+            ffmpeg -hide_banner -filters | grep -qw "$filter" || { echo "::error::ffmpeg lacks the $filter filter"; exit 1; }
+          done
       - name: Test
         run: cargo test --workspace --locked

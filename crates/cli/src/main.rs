@@ -1,9 +1,11 @@
 //! `sabicut`: validate edit plans and inspect the output timeline they produce,
-//! transcribe speech to word timings, and apply transcript fixes.
+//! transcribe speech to word timings, apply transcript fixes, and preview and render
+//! plans.
 
 mod analyze;
 mod files;
 mod fix;
+mod render;
 
 use std::fmt::Display;
 use std::fs::File;
@@ -14,6 +16,7 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand, ValueEnum};
 use sabicut_core::{Fixes, ParseError, Plan, Timeline, Transcript, ValidationErrors};
 
+
 /// Plans are small text files; anything bigger is almost certainly the wrong file.
 const MAX_PLAN_BYTES: usize = 16 * 1024 * 1024;
 
@@ -21,7 +24,9 @@ const MAX_PLAN_BYTES: usize = 16 * 1024 * 1024;
 ///
 /// This version works with edit plans (plan.toml): it validates them, prints their
 /// JSON Schema, and prints the output timeline they produce. It also transcribes
-/// speech to word timings (words.json) and applies transcript fixes (fixes.toml).
+/// speech to word timings (words.json), applies transcript fixes (fixes.toml), writes
+/// preview stills, and renders plans to a vertical MP4 with ffmpeg (captions come
+/// later).
 #[derive(Debug, Parser)]
 #[command(name = "sabicut", version)]
 struct Cli {
@@ -51,6 +56,10 @@ enum Command {
     Analyze(analyze::AnalyzeArgs),
     /// Apply transcript fixes (fixes.toml) to word timings and show what changes
     Fix(fix::FixArgs),
+    /// Write PNG stills at chosen output times, and a contact sheet of them
+    Preview(render::PreviewArgs),
+    /// Render a plan to a vertical MP4 and a cover JPG with ffmpeg
+    Render(render::RenderArgs),
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -76,6 +85,10 @@ enum CliError {
         path: PathBuf,
         errors: ValidationErrors,
     },
+    #[error(transparent)]
+    Tool(#[from] sabicut_render::ToolError),
+    #[error(transparent)]
+    Render(#[from] sabicut_render::RenderError),
     #[error("cannot write output: {0}")]
     Write(#[from] io::Error),
     #[error(transparent)]
@@ -127,6 +140,8 @@ fn run(command: &Command) -> Result<(), CliError> {
         }
         Command::Analyze(args) => analyze::run(args, &mut out)?,
         Command::Fix(args) => fix::run(args, &mut out)?,
+        Command::Preview(args) => render::preview(args, &mut out)?,
+        Command::Render(args) => render::render(args, &mut out)?,
     }
     out.flush()?;
     Ok(())
@@ -134,6 +149,11 @@ fn run(command: &Command) -> Result<(), CliError> {
 
 /// Reads, parses, and validates a plan file.
 fn load(path: &Path) -> Result<Timeline, CliError> {
+    load_plan(path).map(|(_, timeline)| timeline)
+}
+
+/// Reads, parses, and validates a plan file, keeping the plan.
+fn load_plan(path: &Path) -> Result<(Plan, Timeline), CliError> {
     let read_error = |source| CliError::Read {
         path: path.to_owned(),
         source,
@@ -153,10 +173,11 @@ fn load(path: &Path) -> Result<Timeline, CliError> {
         path: path.to_owned(),
         source,
     })?;
-    Timeline::from_plan(&plan).map_err(|errors| CliError::Invalid {
+    let timeline = Timeline::from_plan(&plan).map_err(|errors| CliError::Invalid {
         path: path.to_owned(),
         errors,
-    })
+    })?;
+    Ok((plan, timeline))
 }
 
 fn write_timeline(out: &mut impl Write, path: &Path, timeline: &Timeline) -> io::Result<()> {
