@@ -2,8 +2,9 @@
 # An example Sabicut edit plan (schema v1). Try:
 #   cargo run -- validate examples/plan.toml
 #   cargo run -- timeline examples/plan.toml
-# Paths are relative to this file. The clips, word timings, and font are not part of
-# the repository, so only `validate` and `timeline` work on this example.
+# Paths are relative to this file. The clips and font are not part of the repository,
+# so only `validate` and `timeline` work on this example. Its word timings and fixes
+# are: try `cargo run -- fix examples/words.json examples/fixes.toml`.
 
 schema = 1
 

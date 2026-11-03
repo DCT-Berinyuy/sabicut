@@ -1,0 +1,127 @@
+{
+  "$defs": {
+    "SpeechSegment": {
+      "additionalProperties": false,
+      "description": "A stretch of speech found by voice-activity detection.",
+      "properties": {
+        "end": {
+          "description": "Where the speech ends, in seconds. Greater than start.",
+          "format": "double",
+          "maximum": 86400.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "start": {
+          "description": "Where the speech starts, in seconds.",
+          "format": "double",
+          "maximum": 86400.0,
+          "minimum": 0.0,
+          "type": "number"
+        }
+      },
+      "required": [
+        "start",
+        "end"
+      ],
+      "type": "object"
+    },
+    "Word": {
+      "additionalProperties": false,
+      "description": "One word and when it is spoken.",
+      "properties": {
+        "end": {
+          "description": "When the word ends, in seconds. At least start. `sabicut analyze` ends every\nword inside the stretch of speech it starts in.",
+          "format": "double",
+          "maximum": 86400.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "probability": {
+          "description": "How sure the speech model is of the word, from 0 to 1 (the mean probability of\nits tokens).",
+          "format": "double",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "start": {
+          "description": "When the word starts, in seconds.",
+          "format": "double",
+          "maximum": 86400.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "text": {
+          "description": "The word as written, with its punctuation, like \"Supabase,\". Not empty, no\nspaces at either end, no control characters. It may contain inner spaces:\npunctuation that stands apart, as in French \"moulin !\", is joined to its word\nwith a no-break space, and a fix may join several words into one.",
+          "pattern": "^\\S(.*\\S)?$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "start",
+        "end",
+        "probability"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The transcript of one media file: the stretches of speech that voice-activity\ndetection found, and every word with its timing. Times are in seconds from the\nstart of the media file, to the millisecond.",
+  "properties": {
+    "duration": {
+      "description": "Length of the audio, in seconds.",
+      "format": "double",
+      "maximum": 86400.0,
+      "minimum": 0.0,
+      "type": "number"
+    },
+    "language": {
+      "description": "Spoken language as a lowercase code: \"en\", \"fr\", or \"und\" when it is not\nknown. Pidgin is transcribed as \"en\".",
+      "pattern": "^[a-z]{2,3}$",
+      "type": "string"
+    },
+    "media": {
+      "description": "File name of the transcribed media, without its folder, like \"IMG_0412.mov\".",
+      "pattern": "^[^/\\\\]*\\S[^/\\\\]*$",
+      "type": "string"
+    },
+    "model": {
+      "description": "File name of the speech model that wrote the words, like \"ggml-small-q5_1.bin\".",
+      "pattern": "\\S",
+      "type": "string"
+    },
+    "schema": {
+      "const": 1,
+      "description": "Format version. Always 1 for this schema.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "speech": {
+      "description": "Stretches of speech found by voice-activity detection, in time order and not\noverlapping. Only these were transcribed; everything else is silence or noise.",
+      "items": {
+        "$ref": "#/$defs/SpeechSegment"
+      },
+      "type": "array"
+    },
+    "words": {
+      "description": "Every word, in spoken order. A word starts no earlier than the previous one\nends.",
+      "items": {
+        "$ref": "#/$defs/Word"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema",
+    "media",
+    "language",
+    "model",
+    "duration",
+    "speech",
+    "words"
+  ],
+  "title": "Sabicut word timings (words.json, schema v1)",
+  "type": "object"
+}

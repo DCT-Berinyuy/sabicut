@@ -1,0 +1,25 @@
+#:schema ../schema/fixes-v1.json
+# Example transcript fixes (fixes.toml, schema v1) for examples/words.json. Try:
+#   cargo run -- fix examples/words.json examples/fixes.toml
+# The rules are applied to the words every time they are used, so a new transcription
+# keeps the fixes. Matching is by whole words and ignores capitals and the punctuation
+# around the words; the punctuation is kept.
+
+schema = 1
+
+# Several words become one, from the start of the first to the end of the last.
+[[fix]]
+from = "Supa base"
+to = "Supabase"
+
+# One word for one word keeps its timing.
+[[fix]]
+from = "rust"
+to = "Rust"
+# Capitals are ignored unless a rule asks for them, so "Rust" would match too.
+# case_sensitive = true
+
+# "get hub." becomes "GitHub.": the full stop stays.
+[[fix]]
+from = "get hub"
+to = "GitHub"

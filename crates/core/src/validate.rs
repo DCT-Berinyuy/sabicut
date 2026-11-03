@@ -41,10 +41,11 @@ impl ValidationError {
     }
 }
 
-/// Every problem found in a plan, never empty.
+/// Every problem found in a plan (or in a words.json or fixes.toml file), never empty.
 ///
-/// Problems are grouped by section in schema order (schema, meta, sources, cuts, hook,
-/// captions) and listed in file order within a section. Displays one problem per line.
+/// Problems are grouped by section in schema order (for a plan: schema, meta, sources,
+/// cuts, hook, captions) and listed in file order within a section. Displays one
+/// problem per line.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ValidationErrors(Vec<ValidationError>);
 
@@ -85,14 +86,14 @@ impl std::error::Error for ValidationErrors {}
 
 /// Collects problems as the checks run.
 #[derive(Default)]
-struct Report(Vec<ValidationError>);
+pub(crate) struct Report(Vec<ValidationError>);
 
 impl Report {
-    fn push(&mut self, field: impl Into<String>, message: impl Into<String>) {
+    pub(crate) fn push(&mut self, field: impl Into<String>, message: impl Into<String>) {
         self.0.push(ValidationError::new(field, message));
     }
 
-    fn finish(self) -> Result<(), ValidationErrors> {
+    pub(crate) fn finish(self) -> Result<(), ValidationErrors> {
         if self.0.is_empty() {
             Ok(())
         } else {
