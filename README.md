@@ -127,7 +127,7 @@ sabicut analyze talk.mp4 --lang fr -o words.json --keywords "Supabase,Rust"
 | `--model` | `small` | `tiny`, `base`, `small`, or the path of a ggml model file. Only `small` has usable French |
 | `--lang` | `auto` | `auto` (tells English from French), `en`, `fr`, or `pidgin` (transcribed as English) |
 | `--threads` | `4` | CPU threads for Whisper. Voice-activity detection always uses 1 |
-| `--keywords` | none | Names and terms to spell right, separated by commas. Whisper gets them as a hint for the whole file |
+| `--keywords` | none | Names and terms to spell right, separated by commas. Whisper gets them as a hint for the whole file; it helps but does not force a spelling (fixes.toml does) |
 | `-o`, `--out` | `<name>.words.json` next to the media | Output file, or `-` for standard output |
 | `--vad-pad`, `--vad-threshold` | tuned per language | Audio kept around each stretch of speech (ms), and the speech probability threshold (0 to 1) |
 
@@ -138,7 +138,8 @@ word with a no-break space. The measurements behind the defaults are in
 
 Before the model loads, `analyze` checks the free memory (`MemAvailable`) and stops with a
 suggestion of a smaller model if there is not enough: `small` needs about 0.7 GB. Only one
-transcription runs at a time on a machine; a second one waits for the first.
+transcription runs at a time on a machine; a second one waits for the first. Set
+`SABICUT_WHISPER_LOG=1` to see whisper.cpp's own log lines.
 
 ### Speech models
 
