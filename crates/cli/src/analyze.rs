@@ -84,7 +84,7 @@ pub(crate) fn run(args: &AnalyzeArgs, out: &mut impl Write) -> Result<(), CliErr
         None => Some(args.media.with_extension("words.json")),
     };
     if let Some(path) = &destination {
-        files::check_folder(path).map_err(Error::from)?;
+        files::check_writable(path).map_err(Error::from)?;
     }
 
     let mut progress = ProgressLine::new();
@@ -166,7 +166,7 @@ fn summary(destination: &str, analysis: &Analysis) -> String {
         "  audio {:.1} s, speech {:.1} s in {} (padding {} ms, threshold {:.2})\n",
         report.audio_seconds,
         report.speech_seconds,
-        crate::count(report.speech_segments, "stretch"),
+        crate::count(report.speech_segments, "speech segment"),
         report.vad.pad_ms,
         report.vad.threshold,
     ));

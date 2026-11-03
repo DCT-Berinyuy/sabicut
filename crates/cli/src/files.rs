@@ -65,6 +65,26 @@ pub(crate) fn check_folder(path: &Path) -> Result<(), FileError> {
     }
 }
 
+/// Fails unless `path` can be written, by creating and removing the temporary file that
+/// [`write_atomic`] would use. Slow commands call this before they start.
+pub(crate) fn check_writable(path: &Path) -> Result<(), FileError> {
+    check_folder(path)?;
+    let temporary = temporary_path(path);
+    File::create(&temporary).map_err(|source| FileError::Write {
+        path: path.to_owned(),
+        source,
+    })?;
+    // It was just created; if it cannot be removed, the real write will report why.
+    let _ = fs::remove_file(&temporary);
+    Ok(())
+}
+
+fn temporary_path(path: &Path) -> PathBuf {
+    let mut temporary = path.as_os_str().to_owned();
+    temporary.push(format!(".tmp-{}", std::process::id()));
+    PathBuf::from(temporary)
+}
+
 /// Writes `contents` to `path` through a temporary file in the same folder, so an
 /// interrupted run never leaves half a file behind.
 pub(crate) fn write_atomic(path: &Path, contents: &str) -> Result<(), FileError> {
@@ -73,9 +93,7 @@ pub(crate) fn write_atomic(path: &Path, contents: &str) -> Result<(), FileError>
         source,
     };
     check_folder(path)?;
-    let mut temporary = path.as_os_str().to_owned();
-    temporary.push(format!(".tmp-{}", std::process::id()));
-    let temporary = PathBuf::from(temporary);
+    let temporary = temporary_path(path);
     let written = File::create(&temporary).and_then(|mut file| {
         file.write_all(contents.as_bytes())?;
         file.sync_all()

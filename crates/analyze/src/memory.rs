@@ -14,6 +14,9 @@ const FIXED: u64 = 245 * MIB;
 const MODEL_FACTOR: f64 = 1.95;
 /// Memory left free for the rest of the system.
 const HEADROOM: u64 = 100 * MIB;
+/// Dynamic time warping keeps attention weights for its alignment (measured: 55 MiB
+/// more with the small model).
+pub(crate) const DTW_EXTRA: u64 = 64 * MIB;
 
 /// Expected peak memory of a transcription, in bytes.
 pub(crate) fn estimated_peak(model_bytes: u64, audio_samples: usize) -> u64 {

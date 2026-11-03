@@ -101,9 +101,12 @@ pub struct Settings {
     /// Only find the speech: no Whisper model is loaded and no words are written.
     pub vad_only: bool,
     /// Word starts from whisper.cpp's dynamic time warping instead of its timestamp
-    /// heuristics. Needs a named model (tiny, base or small).
+    /// heuristics. Needs a named model (tiny, base or small). Experimental: 5–10 ms
+    /// better at the median, but 16% slower and 45–65 MiB more memory with `small`
+    /// (see `docs/bench/analyze.md`).
     pub dtw: bool,
-    /// whisper.cpp's flash attention (not combined with `dtw`).
+    /// whisper.cpp's flash attention (not combined with `dtw`). Experimental: 23% less
+    /// memory with `small`, but about 30% slower on CPU.
     pub flash_attn: bool,
     /// Let whisper.cpp print its own log lines to standard error.
     pub whisper_logs: bool,
@@ -420,19 +423,15 @@ pub fn analyze(
             )
             .map_err(|message| model.error(message))?;
             drop(vad);
-            let heard = transcribe(&mut engine, &segments, &samples, report.language, progress)
-                .map_err(|message| model.error(message))?;
+            let (heard, chunks) =
+                transcribe(&mut engine, &segments, &samples, report.language, progress)
+                    .map_err(|message| model.error(message))?;
             report.transcribing = step.elapsed();
+            report.chunks = chunks;
             (segments, heard)
         }
     };
 
-    let chunks = chunks::pack(&segments);
-    report.chunks = if report.loading_model.is_zero() {
-        0
-    } else {
-        chunks.len()
-    };
     report.speech_segments = segments.len();
     report.speech_seconds = seconds(segments.iter().map(ExactSizeIterator::len).sum());
     let speech = segments
@@ -492,13 +491,14 @@ fn speech_segments(
     vad.segments(report.vad)
 }
 
+/// Transcribes the speech chunk by chunk. Returns the words and the number of chunks.
 fn transcribe(
     engine: &mut Engine,
     segments: &[Range<usize>],
     samples: &[f32],
     language: Option<Language>,
     progress: &mut dyn FnMut(Progress),
-) -> Result<Vec<HeardWord>, String> {
+) -> Result<(Vec<HeardWord>, usize), String> {
     let chunks = chunks::pack(segments);
     let total = seconds(chunks.iter().map(Chunk::speech_len).sum());
     let mut done = 0;
@@ -523,7 +523,7 @@ fn transcribe(
         done += chunk.speech_len();
     }
     progress(Progress::Transcribing { done: total, total });
-    Ok(heard)
+    Ok((heard, chunks.len()))
 }
 
 /// The Whisper model of a transcription.
@@ -532,6 +532,7 @@ struct WhisperModel {
     name: String,
     size: Option<ModelSize>,
     bytes: u64,
+    dtw: bool,
 }
 
 impl WhisperModel {
@@ -558,13 +559,15 @@ impl WhisperModel {
             path,
             size,
             bytes,
+            dtw: settings.dtw,
         })
     }
 
     /// Fails if the machine lacks the memory for this model and `samples` of audio.
     /// Returns the bytes needed and available.
     fn check_memory(&self, samples: usize) -> Result<(u64, Option<u64>), AnalyzeError> {
-        let needed = memory::needed(self.bytes, samples);
+        let extra = if self.dtw { memory::DTW_EXTRA } else { 0 };
+        let needed = memory::needed(self.bytes, samples).saturating_add(extra);
         let available = memory::available();
         if let Some(available) = available
             && available < needed
