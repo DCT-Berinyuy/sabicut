@@ -228,7 +228,10 @@ in the order given) into the preview directory. A time maps to the frame being s
 that moment. Each still seeks its source to just before the frame it needs, decodes up to
 that one frame and runs the same filters as the render. ffmpeg makes up to four stills
 per run (each still needs a decoder of its own, so this bounds memory), then lays out
-the sheet from the PNGs. Five stills take about 2 to 3 seconds.
+the sheet from the PNGs. Each still decodes forward from the keyframe before it, so speed
+depends on how often the clip has a keyframe. Phone clips usually have one every second or
+two, and five stills take about 2 to 3 seconds. A clip with a keyframe only every 4 seconds
+took 15 seconds for six stills on the test laptop.
 
 ### Safe-zone guide
 
