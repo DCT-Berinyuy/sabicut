@@ -33,10 +33,10 @@ pub enum AudioError {
     /// The path is a folder or something else that is not a file.
     #[error("{}: not a file", .0.display())]
     NotAFile(PathBuf),
-    /// ffmpeg is not installed, or not on the `PATH`.
+    /// ffmpeg is not installed: not on the `PATH`, or not where `SABICUT_FFMPEG` says.
     #[error(
         "ffmpeg not found: Sabicut uses it to read audio, so install it (for example with \
-         your package manager) and try again"
+         your package manager), or set SABICUT_FFMPEG to its path, and try again"
     )]
     FfmpegMissing,
     /// ffmpeg could not be started.
@@ -89,7 +89,7 @@ pub fn decode(path: &Path) -> Result<Vec<f32>, AudioError> {
     check_file(path)?;
     let mut input = OsString::from("file:");
     input.push(path.as_os_str());
-    let mut child = Command::new("ffmpeg")
+    let mut child = Command::new(sabicut_core::host::ffmpeg_program())
         .args(["-nostdin", "-hide_banner", "-loglevel", "error"])
         .args(["-protocol_whitelist", "file", "-i"])
         .arg(&input)

@@ -1,0 +1,21 @@
+[package]
+name = "sabicut-render"
+description = "Turns a Sabicut edit plan into an ffmpeg graph: frame-exact render and preview stills"
+readme = "../../README.md"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+sabicut-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
