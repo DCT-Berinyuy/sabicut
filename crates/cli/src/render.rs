@@ -240,6 +240,14 @@ impl<W: Write> Reporter<W> {
     fn report(&mut self, progress: Progress) {
         // Progress is a courtesy: if stderr is gone, keep rendering.
         let _ = match progress {
+            Progress::Waiting => writeln!(
+                self.log,
+                "waiting for another sabicut job (a transcription or a render) to finish..."
+            ),
+            Progress::LockUnavailable(error) => writeln!(
+                self.log,
+                "note: cannot take the one-job-at-a-time lock ({error}); rendering anyway"
+            ),
             Progress::Audio => writeln!(self.log, "cutting and cleaning up the audio..."),
             Progress::Loudness => writeln!(self.log, "measuring loudness..."),
             Progress::Video { done, total } => self.video(done, total),

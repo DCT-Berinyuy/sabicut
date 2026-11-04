@@ -2,6 +2,8 @@
 //! and the output timeline derived from a plan's cuts. It also defines the word
 //! timings file (`words.json`, [`Transcript`]) and the transcript fixes
 //! (`fixes.toml`, [`Fixes`], [`apply_fixes`]), with no dependency on a speech model.
+//! [`host`] holds what the heavy commands share: one job at a time on a machine, and
+//! which ffmpeg to run.
 //!
 //! ```
 //! use sabicut_core::{Plan, Timeline};
@@ -44,6 +46,7 @@
 )]
 
 mod fixes;
+pub mod host;
 mod plan;
 mod rational;
 mod schema_gen;

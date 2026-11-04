@@ -157,8 +157,13 @@ pub struct RenderOptions {
 }
 
 /// A step of the render, for progress reports.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Progress {
+    /// Another heavy job (a transcription or a render) is running on this machine;
+    /// this render waits for it.
+    Waiting,
+    /// The one-job-at-a-time lock could not be taken; the render runs anyway.
+    LockUnavailable(String),
     /// Cutting and cleaning up the audio.
     Audio,
     /// Measuring loudness.
@@ -213,6 +218,15 @@ pub fn render(
             Some(project.frame_at(at, "--cover-at")?)
         }
         None => None,
+    };
+    // One heavy job at a time on this machine (PRD H4): wait while a transcription or
+    // another render runs. If the lock cannot be taken at all, render anyway.
+    let _lock = match sabicut_core::host::acquire_job_lock(|| progress(Progress::Waiting)) {
+        Ok(lock) => Some(lock),
+        Err(error) => {
+            progress(Progress::LockUnavailable(error.to_string()));
+            None
+        }
     };
     let parent = parent_dir(&options.output);
     fs::create_dir_all(&parent).map_err(RenderError::io(&parent))?;

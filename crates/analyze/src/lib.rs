@@ -35,7 +35,6 @@
 mod assemble;
 mod audio;
 mod chunks;
-mod lock;
 mod memory;
 mod models;
 mod transcribe;
@@ -189,9 +188,10 @@ impl Settings {
 /// What a transcription is doing, for progress messages.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Progress {
-    /// Another transcription is running on this machine; this one waits for it.
+    /// Another heavy job (a transcription or a render) is running on this machine;
+    /// this one waits for it.
     Waiting,
-    /// The one-transcription-at-a-time lock could not be taken; this one runs anyway.
+    /// The one-job-at-a-time lock could not be taken; this one runs anyway.
     LockUnavailable(String),
     /// ffmpeg is decoding the audio.
     ReadingAudio,
@@ -359,7 +359,7 @@ pub fn analyze(
         model.check_memory(0)?;
     }
 
-    let _lock = match lock::acquire(|| progress(Progress::Waiting)) {
+    let _lock = match sabicut_core::host::acquire_job_lock(|| progress(Progress::Waiting)) {
         Ok(lock) => Some(lock),
         Err(error) => {
             progress(Progress::LockUnavailable(error.to_string()));

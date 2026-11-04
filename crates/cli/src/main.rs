@@ -16,7 +16,6 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand, ValueEnum};
 use sabicut_core::{Fixes, ParseError, Plan, Timeline, Transcript, ValidationErrors};
 
-
 /// Plans are small text files; anything bigger is almost certainly the wrong file.
 const MAX_PLAN_BYTES: usize = 16 * 1024 * 1024;
 

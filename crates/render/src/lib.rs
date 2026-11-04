@@ -58,4 +58,5 @@ pub use render::{
     AUDIO_BITRATE, CRF, DEFAULT_COVER_SECONDS, MAX_LOOKAHEAD, Preset, Progress, RenderOptions,
     RenderReport, UnknownPreset, render,
 };
-pub use tools::{FFMPEG_ENV, FFPROBE_ENV, Ffmpeg, ToolError};
+pub use sabicut_core::host::{FFMPEG_ENV, FFPROBE_ENV};
+pub use tools::{Ffmpeg, ToolError};

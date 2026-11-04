@@ -8,11 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
 use std::thread::{self, JoinHandle};
 
-/// Environment variable naming the ffmpeg binary to use instead of `ffmpeg` on `PATH`.
-pub const FFMPEG_ENV: &str = "SABICUT_FFMPEG";
-/// Environment variable naming the ffprobe binary to use. Without it, the `ffprobe`
-/// next to the chosen ffmpeg is used, or `ffprobe` on `PATH`.
-pub const FFPROBE_ENV: &str = "SABICUT_FFPROBE";
+use sabicut_core::host::{FFMPEG_ENV, FFPROBE_ENV, ffmpeg_program, ffprobe_program};
 
 /// How much of ffmpeg's stderr is kept for error messages and log parsing.
 const STDERR_KEEP_BYTES: usize = 256 * 1024;
@@ -109,18 +105,12 @@ pub struct Ffmpeg {
 }
 
 impl Ffmpeg {
-    /// Finds ffmpeg and ffprobe: from [`FFMPEG_ENV`] and [`FFPROBE_ENV`] if set, else on
-    /// `PATH`. Runs both once to check that they work and to list ffmpeg's filters
-    /// and encoders.
+    /// Finds ffmpeg and ffprobe the way every Sabicut command does
+    /// ([`sabicut_core::host::ffmpeg_program`]): from `SABICUT_FFMPEG` and
+    /// `SABICUT_FFPROBE` if set, else on `PATH`. Runs both once to check that they work
+    /// and to list ffmpeg's filters and encoders.
     pub fn from_env() -> Result<Self, ToolError> {
-        let ffmpeg = std::env::var_os(FFMPEG_ENV)
-            .filter(|value| !value.is_empty())
-            .map_or_else(|| PathBuf::from("ffmpeg"), PathBuf::from);
-        let ffprobe = std::env::var_os(FFPROBE_ENV)
-            .filter(|value| !value.is_empty())
-            .map(PathBuf::from)
-            .unwrap_or_else(|| sibling_ffprobe(&ffmpeg));
-        Self::new(ffmpeg, ffprobe)
+        Self::new(ffmpeg_program(), ffprobe_program())
     }
 
     /// Uses the given binaries. Runs both once to check that they work and to list
@@ -250,21 +240,6 @@ impl Ffmpeg {
             })
         }
     }
-}
-
-/// `ffprobe` in the same directory as `ffmpeg` when `ffmpeg` is a path, else `ffprobe`.
-fn sibling_ffprobe(ffmpeg: &Path) -> PathBuf {
-    let has_dir = ffmpeg
-        .parent()
-        .is_some_and(|dir| !dir.as_os_str().is_empty());
-    if !has_dir {
-        return PathBuf::from("ffprobe");
-    }
-    let name = match ffmpeg.extension() {
-        Some(ext) => format!("ffprobe.{}", ext.to_string_lossy()),
-        None => "ffprobe".to_owned(),
-    };
-    ffmpeg.with_file_name(name)
 }
 
 /// Runs a program to completion and returns its stdout as text.
@@ -464,19 +439,6 @@ mod tests {
         let listing = "Encoders:\n V..... = Video\n A..... = Audio\n ------\n V....D libx264              libx264 H.264\n A....D aac                  AAC (Advanced Audio Coding)\n";
         let encoders = parse_encoders(listing);
         assert_eq!(encoders.into_iter().collect::<Vec<_>>(), ["aac", "libx264"]);
-    }
-
-    #[test]
-    fn ffprobe_is_found_next_to_an_explicit_ffmpeg() {
-        assert_eq!(
-            sibling_ffprobe(Path::new("/opt/ff/bin/ffmpeg")),
-            Path::new("/opt/ff/bin/ffprobe")
-        );
-        assert_eq!(
-            sibling_ffprobe(Path::new("C:/ff/ffmpeg.exe")),
-            Path::new("C:/ff/ffprobe.exe")
-        );
-        assert_eq!(sibling_ffprobe(Path::new("ffmpeg")), Path::new("ffprobe"));
     }
 
     #[test]

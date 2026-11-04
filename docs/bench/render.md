@@ -13,8 +13,9 @@ and a 10-minute recording turned into a 60 s short in at most 8 minutes on 4 CPU
   process counts the shared ffmpeg libraries again; split proportionally (PSS), the peaks
   are 614 and 546 MB.
 - **Time: well inside the 8 minutes.** 141 s with `medium` and 90 s with `veryfast` for a
-  60 s short, while another session's Whisper runs kept the load average at 8 to 9 on this
-  4-thread laptop. 87% of the time is the video encode.
+  60 s short. These are upper bounds: another session's Whisper runs kept the load average
+  at 8 to 9 on this 4-thread laptop, which can only slow a render down. 87% of the time is
+  the video encode.
 - **Every frame was right.** All 1,800 output frames showed the source frame the
   timeline asks for, read back from a frame-number patch in the source. That includes a
   pair of cuts used out of order and six cuts with zooms. Loudness came out at −13.8 LUFS
@@ -22,6 +23,13 @@ and a 10-minute recording turned into a 60 s short in at most 8 minutes on 4 CPU
 - **4K HDR is over budget: 848 MB** for a 4K 10-bit HEVC HLG source, like iPhone HDR
   video (see below). The PRD already asks creators to record in 1080p (§13). Bringing 4K
   under 800 MB needs a design choice, listed at the end.
+
+These runs are not clean timings. The laptop was shared with other work all evening
+(load 8 to 9, and swap well used by other programs), and a quiet re-run was not possible,
+so the clean measurement moves to the real hub laptop, as for the Whisper benchmark. Swap
+cannot have inflated the times beyond that, and it is unlikely to have hidden memory:
+`VmSwap` was not recorded, but free memory (`MemAvailable`) never fell below 1.45 GB
+during these runs, so the kernel had no reason to swap out ffmpeg's working set.
 
 ## Setup
 

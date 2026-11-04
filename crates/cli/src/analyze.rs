@@ -205,7 +205,10 @@ impl ProgressLine {
 
     fn show(&mut self, event: &Progress) {
         let text = match event {
-            Progress::Waiting => "waiting for another transcription to finish...".to_owned(),
+            Progress::Waiting => {
+                "waiting for another sabicut job (a transcription or a render) to finish..."
+                    .to_owned()
+            }
             Progress::LockUnavailable(error) => {
                 self.clear();
                 eprintln!(

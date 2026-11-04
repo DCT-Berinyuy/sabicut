@@ -31,7 +31,7 @@ sabicut render plan.toml -o short.mp4 --cover-at 3.2 --preset veryfast
 
 ffmpeg and ffprobe 6.1 or newer, on `PATH` or named by `SABICUT_FFMPEG` and
 `SABICUT_FFPROBE` (without `SABICUT_FFPROBE`, the `ffprobe` next to `SABICUT_FFMPEG` is
-used). Tested with Ubuntu 24.04's 6.1.1 (CI), a 6.1.3 static build and Arch's 9.0.2.
+used). `sabicut analyze` uses the same setting. Tested with Ubuntu 24.04's 6.1.1 (CI), a 6.1.3 static build and Arch's 9.0.2.
 The build needs:
 
 - encoders `libx264`, `aac`, `png` (stills) and `mjpeg` (cover);
@@ -54,6 +54,10 @@ Source paths are opened as local files only (`file:` URLs with
    short-lived ffmpeg of its own, one cut after another, which trims, crops, tone-maps,
    scales and zooms it and pipes the raw frames to the encoder. The encoder adds the
    overlays, normalizes the WAV (second loudness pass) and writes the MP4.
+
+A render first waits while a transcription (`sabicut analyze`) or another render runs on
+the same machine: they share one lock, so only one heavy job runs at a time (PRD H4).
+Previews do not wait, because they are light and meant to be quick.
 
 Intermediate files go in a hidden scratch directory next to the output (not `/tmp`, which
 is often RAM) and are removed afterwards. The MP4 is written to the scratch directory
