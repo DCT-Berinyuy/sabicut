@@ -1,0 +1,19 @@
+[package]
+name = "sabicut-plan"
+description = "Sabicut's rules engine: cuts pauses and false starts from word timings, adds keyword zooms, and writes an edit plan"
+readme = "../../README.md"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+sabicut-core.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

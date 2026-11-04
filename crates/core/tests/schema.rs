@@ -135,3 +135,52 @@ fn invalid_toml_is_a_parse_error() {
         Err(ParseError::Toml(_))
     ));
 }
+
+#[test]
+fn per_source_words_round_trip_through_toml() {
+    let plan = Plan::from_toml_str(
+        r##"
+        schema = 1
+        meta = { fps = 30, out = { w = 1080, h = 1920 } }
+        source = [
+            { id = "a", path = "a.mp4", crop_x = 0.5, words = "a.words.json" },
+            { id = "b", path = "b.mp4", crop_x = 0.5, words = "b.words.json" },
+        ]
+        cut = [{ src = "a", in = 0, out = 2 }, { src = "b", in = 1, out = 2 }]
+        captions = { font = "f.ttf", active = "#FFC400", stroke = 10 }
+        "##,
+    )
+    .unwrap();
+    assert_eq!(plan.validate(), Ok(()));
+    assert_eq!(plan.captions().unwrap().words(), None);
+
+    let written = toml::to_string(&plan).unwrap();
+    assert!(written.contains("words = \"b.words.json\""), "{written}");
+    let read = Plan::from_toml_str(&written).unwrap();
+    assert_eq!(read, plan);
+    assert_eq!(read.caption_words("b"), Some("b.words.json"));
+}
+
+#[test]
+fn an_empty_captions_table_round_trips_without_style_fields() {
+    let plan = Plan::from_toml_str(
+        r#"
+        schema = 1
+        meta = { fps = 30, out = { w = 1080, h = 1920 } }
+        source = [{ id = "a", path = "a.mp4", crop_x = 0.5, words = "a.words.json" }]
+        cut = [{ src = "a", in = 0, out = 2 }]
+
+        [captions]
+        "#,
+    )
+    .unwrap();
+    assert_eq!(plan.validate(), Ok(()));
+    assert_eq!(plan.caption_words("a"), Some("a.words.json"));
+
+    let written = toml::to_string(&plan).unwrap();
+    assert!(written.contains("[captions]"), "{written}");
+    for key in ["font", "active", "stroke"] {
+        assert!(!written.contains(key), "{written}");
+    }
+    assert_eq!(Plan::from_toml_str(&written).unwrap(), plan);
+}

@@ -1,10 +1,11 @@
 //! `sabicut`: validate edit plans and inspect the output timeline they produce,
-//! transcribe speech to word timings, apply transcript fixes, and preview and render
-//! plans.
+//! transcribe speech to word timings, apply transcript fixes, write plans from the word
+//! timings, and preview and render plans.
 
 mod analyze;
 mod files;
 mod fix;
+mod plan;
 mod render;
 
 use std::fmt::Display;
@@ -24,8 +25,8 @@ const MAX_PLAN_BYTES: usize = 16 * 1024 * 1024;
 /// This version works with edit plans (plan.toml): it validates them, prints their
 /// JSON Schema, and prints the output timeline they produce. It also transcribes
 /// speech to word timings (words.json), applies transcript fixes (fixes.toml), writes
-/// preview stills, and renders plans to a vertical MP4 with ffmpeg (captions come
-/// later).
+/// plans from the word timings, writes preview stills, and renders plans to a vertical
+/// MP4 with ffmpeg (captions come later).
 #[derive(Debug, Parser)]
 #[command(name = "sabicut", version)]
 struct Cli {
@@ -55,6 +56,9 @@ enum Command {
     Analyze(analyze::AnalyzeArgs),
     /// Apply transcript fixes (fixes.toml) to word timings and show what changes
     Fix(fix::FixArgs),
+    /// Write an edit plan (plan.toml) from word timings: cut pauses and false starts,
+    /// crop to 9:16, and zoom in on keywords
+    Plan(Box<plan::PlanArgs>),
     /// Write PNG stills at chosen output times, and a contact sheet of them
     Preview(render::PreviewArgs),
     /// Render a plan to a vertical MP4 and a cover JPG with ffmpeg
@@ -94,6 +98,8 @@ enum CliError {
     Analyze(#[from] analyze::Error),
     #[error(transparent)]
     Fix(#[from] fix::Error),
+    #[error(transparent)]
+    Plan(#[from] plan::Error),
 }
 
 fn main() -> ExitCode {
@@ -139,6 +145,7 @@ fn run(command: &Command) -> Result<(), CliError> {
         }
         Command::Analyze(args) => analyze::run(args, &mut out)?,
         Command::Fix(args) => fix::run(args, &mut out)?,
+        Command::Plan(args) => plan::run(args, &mut out)?,
         Command::Preview(args) => render::preview(args, &mut out)?,
         Command::Render(args) => render::render(args, &mut out)?,
     }

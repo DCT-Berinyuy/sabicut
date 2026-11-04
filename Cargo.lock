@@ -406,6 +406,7 @@ dependencies = [
  "clap",
  "sabicut-analyze",
  "sabicut-core",
+ "sabicut-plan",
  "sabicut-render",
  "thiserror",
 ]
@@ -419,6 +420,14 @@ dependencies = [
  "serde_json",
  "thiserror",
  "toml",
+]
+
+[[package]]
+name = "sabicut-plan"
+version = "0.1.0"
+dependencies = [
+ "sabicut-core",
+ "thiserror",
 ]
 
 [[package]]

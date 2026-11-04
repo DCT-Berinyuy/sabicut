@@ -22,8 +22,9 @@ but without captions yet.
 If a phase misses its exit criterion by more than a week, work stops for a review.
 
 What works today is the edit-plan format (`plan.toml`) and its commands, offline
-transcription to word timings (`words.json`), transcript fixes (`fixes.toml`), and
-previews and rendering of plans, without captions so far.
+transcription to word timings (`words.json`), transcript fixes (`fixes.toml`), plans
+written automatically from the words, and previews and rendering of plans, without
+captions so far.
 
 | Command | What it does |
 |---|---|
@@ -32,11 +33,12 @@ previews and rendering of plans, without captions so far.
 | `sabicut timeline <plan.toml>` | Prints the output timeline derived from the plan's cuts, to the frame |
 | `sabicut analyze <media>` | Transcribes the speech in a video or audio file to word timings, offline |
 | `sabicut fix <words.json> <fixes.toml>` | Applies transcript fixes to word timings and lists what changes |
+| `sabicut plan <media>...` | Writes an edit plan from the word timings: cuts pauses and false starts, crops to 9:16, zooms in on keywords |
 | `sabicut preview <plan.toml> --at 1.5,8,22` | Writes PNG stills at those output times and a contact sheet, optionally with the apps' safe zones shaded |
 | `sabicut render <plan.toml>` | Renders a 1080×1920 MP4 (frame-exact cuts, crop, zooms, HDR tone mapping, cleaned-up audio at −14 LUFS) and a cover JPG |
 
-Captions, automatic planning, and the Wi-Fi hub come next. How rendering and previews
-work, including how zooms move, is in [docs/render.md](docs/render.md).
+Captions and the Wi-Fi hub come next. How rendering and previews work, including how
+zooms move, is in [docs/render.md](docs/render.md).
 The full plan is in the [product requirements document](docs/PRD.md).
 
 ## Build and run
@@ -98,14 +100,20 @@ only optional fields may be added, and a breaking change means `schema = 2`. See
 | `meta.fps` | yes | Output frame rate, 1 to 240 |
 | `meta.out` | yes | Output size `{ w, h }` in pixels: even, 2 to 8192 |
 | `[[source]]` `id`, `path`, `crop_x` | yes | Source clips. `id` is 1 to 64 letters, digits, `_` or `-`; `crop_x` is the centre of the 9:16 crop, 0 to 1 |
+| `[[source]]` `words` | no | The clip's word timings file (words.json), for the captions |
 | `[[cut]]` `src`, `in`, `out` | yes | Ranges kept from the sources, in output order, in seconds of source time (0 to 86400) |
 | `[[cut]]` `zoom` | no | Punch-in zooms `[{ at, scale }]`: `at` is source time inside the cut, at least 1 frame apart and before `out`; `scale` is 1 to 4 |
 | `[hook]` `text`, `dur` | no | Hook text shown for the first `dur` seconds of the output |
-| `[captions]` `words`, `font`, `active`, `stroke` | no | Word timings file, font file, active-word colour (`#RRGGBB`), outline width (0 to 64 px) |
-| `[captions]` `fixes`, `keywords` | no | Replacement rules file, and words always drawn in the active colour |
+| `[captions]` `font`, `active`, `stroke` | no | Font file (default: the Anton font that sabicut bundles), active-word colour (`#RRGGBB`, default `#FFC400`, gold), outline width (0 to 64 px, default 10) |
+| `[captions]` `words`, `fixes`, `keywords` | no | Word timings file of the only source, replacement rules file, and words always drawn in the active colour |
 
 Relative paths are resolved from the plan file's directory. Unknown keys are rejected, so
 typos are caught.
+
+Captions need word timings for every source that a cut uses. A source's own `words`
+comes first; `captions.words` is used only when the plan has a single source. So a plan
+with `[captions]` and more than one source names the word timings on each source, and
+`validate` reports any source a cut uses that has none.
 
 **Timing is derived, never stored.** Times are read to the microsecond. Each cut's `in`
 and `out` snap to the nearest frame boundary at `meta.fps`, so every cut is a whole number
@@ -233,12 +241,76 @@ examples/words.json: 3 changes from examples/fixes.toml
 
 With `--out fixed.json` (or `-o -` for standard output) it also writes the fixed words.
 
+## Automatic plans
+
+`sabicut plan` writes a first edit plan from the word timings of one or more clips. It
+cuts pauses and false starts, centres the 9:16 crop, and zooms in on keywords. The plan
+is a starting point: open it, read the comments, and edit it by hand.
+
+```sh
+sabicut analyze raw/IMG_0412.mov                    # writes raw/IMG_0412.words.json
+sabicut plan raw/IMG_0412.mov --keywords "Rust,Supabase" --hook "Stop leaking your API keys"
+sabicut plan raw/IMG_0412.mov raw/IMG_0415.mov --fixes fixes.toml -o edit/plan.toml
+```
+
+Clips play in the order given. Each clip's word timings are read from where `analyze`
+writes them, `<name>.words.json` next to the clip, unless `--words` names a file for each
+clip. `--fixes` applies transcript fixes before planning. Paths in the plan are written
+relative to the plan file. A plan is made to be edited by hand, so `plan` never replaces
+one unless you pass `--force`.
+
+| Rule | What it does | Options (default) |
+|---|---|---|
+| Pauses | A pause between words longer than the threshold is cut, keeping some silence ahead of the speech and after it. Speech runs to the edges of its speech segment, up to 1 s past its words, because voice-activity detection finds where a voice starts and stops better than the word times do. A pause is only cut if that removes enough, and kept sections that are too short, such as a lone "um", are dropped | `--max-pause` (0.4 s), `--pad-before` (0.15 s), `--pad-after` (0.1 s), `--min-cut` (0.2 s), `--min-keep` (0.5 s) |
+| False starts | A phrase broken off and said again from its start ("So today we… So today we're going to talk about Rust") is cut, keeping the last take. The fragment must start a phrase, break off at a dash, an ellipsis or a pause of at least 0.2 s, not end a sentence, and repeat word for word at the start of the next phrase (its last word may be cut short, "tod-" for "today"), and the next phrase must go on further. Emphasis ("very, very good", "oh dear, oh dear,"), one-word repeats and complete sentences said twice are kept | `--false-start-words` (2), `--no-false-starts` |
+| No mid-word cuts | Every cut lands on a frame boundary of the output rate, outside every word. A false start with no pause around it has no clean place to cut, so it is kept and listed | `--fps` (30) |
+| Crop | Every clip is cropped to 9:16 around its centre | `--crop-x`: one value for all clips, or one per clip separated by commas (0.5) |
+| Zooms | A punch-in zoom starts with each keyword and holds until the next zoom or the end of the cut. Optionally it zooms back out after the keyword, and every second cut starts zoomed in to hide jump cuts | `--zoom` (1.25), `--zoom-hold` (off), `--cut-zoom` (off), `--no-zoom` |
+| Hook | The hook text over the opening seconds, shortened if the output is shorter | `--hook`, `--hook-dur` (2 s) |
+| Captions | `[captions]` with the fixes and keywords. With one clip its word timings go in `captions.words`; with several, each `[[source]]` names its own. The font, colour and outline are left out, so the defaults apply (Anton, gold, 10 px) | `--font`, `--active`, `--stroke`, `--no-captions` |
+
+`plan` prints what it kept and cut, every false start, and a warning when the output is
+longer than `--target` (60 s). For a clip with a false start:
+
+```text
+$ sabicut plan raw/IMG_0412.mov --keywords Rust --hook "Stop leaking your API keys"
+wrote plan.toml: 3 cuts, 3.800 s at 30 fps, from 10.300 s of 1 clip
+  a   raw/IMG_0412.mov     10.300 s ->     3.800 s in 3 cuts
+  cut: pauses 3.5 s, false starts 3.0 s (1), too short 0.0 s (0)
+  false starts cut (each has a "# removed" line in the plan, to bring it back):
+    a       2.300 -     5.333  "So today we..."
+  1 zoom; cut points inside a word: 0 of 6
+```
+
+In the plan, each cut has a comment with its words, and a `# removed` line shows each
+range that was cut and why. To bring one back, move the `out` of the cut before it (or
+the `in` of the cut after it) over the range:
+
+```toml
+[[cut]]  # "Stop leaking your keys."
+src = "a"
+in = 0.833
+out = 2.300
+
+# removed a 2.300 - 5.333 (3.033 s): false start "So today we..."
+[[cut]]  # "So today we learn Rust."
+src = "a"
+in = 5.333
+out = 7.100
+zoom = [{ at = 6.700, scale = 1.25 }]  # "Rust"
+```
+
+The defaults were measured on the benchmark's 10-minute LibriVox readings in English and
+French, against their audio: see [`docs/bench/plan.md`](docs/bench/plan.md).
+
 ## Repository layout
 
 ```text
 crates/core/     sabicut-core: plan types, schema v1, validation, rational time, timeline,
                  words.json and fixes.toml (no dependency on the speech model)
 crates/analyze/  sabicut-analyze: ffmpeg audio, Silero speech detection, whisper.cpp
+crates/plan/     sabicut-plan: the rules that write a plan from word timings (pauses,
+                 false starts, zooms), with no dependency on the speech model or ffmpeg
 crates/render/   sabicut-render: ffmpeg graph builder, render, preview stills
 crates/cli/      sabicut-cli: the `sabicut` command
 schema/          JSON Schemas of plan.toml (v1.json), words.json and fixes.toml,
@@ -275,6 +347,13 @@ ffmpeg installed, run them with:
 
 ```sh
 cargo test -p sabicut-analyze -- --ignored
+```
+
+The plan tests on real transcripts are ignored too. They read the benchmark's word
+timings and fixes from `~/.cache/sabicut/bench/words` (or `$SABICUT_BENCH/words`):
+
+```sh
+cargo test -p sabicut-plan --test real -- --ignored --nocapture
 ```
 
 ## License

@@ -1,6 +1,6 @@
 //! Validation reports every problem, each naming its field and cut index.
 
-use sabicut_core::{Plan, Timeline};
+use sabicut_core::{Captions, Plan, Timeline};
 
 /// A valid plan, with `{source}`, `{cuts}` and `{extra}` spliced in.
 fn plan_with(meta: &str, sources: &str, cuts: &str, extra: &str) -> String {
@@ -323,5 +323,178 @@ fn every_problem_is_reported_at_once_in_schema_order() {
             "cut[1].out must be > in",
             "hook.text must not be blank",
         ]
+    );
+}
+
+/// A source with id `id`, and `words = "<words>"` when given.
+fn source(id: &str, words: Option<&str>) -> String {
+    let words = words
+        .map(|words| format!("words = \"{words}\"\n"))
+        .unwrap_or_default();
+    format!("[[source]]\nid = \"{id}\"\npath = \"{id}.mov\"\ncrop_x = 0.5\n{words}")
+}
+
+/// A [captions] table, with `words = "<words>"` when given.
+fn captions(words: Option<&str>) -> String {
+    let words = words
+        .map(|words| format!("words = \"{words}\"\n"))
+        .unwrap_or_default();
+    format!("[captions]\n{words}font = \"f.ttf\"\nactive = \"#FFC400\"\nstroke = 10\n")
+}
+
+/// A plan with these sources, one cut from each source id in `cuts_from`, and `extra`.
+fn plan_from(sources: &[String], cuts_from: &[&str], extra: &str) -> Plan {
+    let cuts: String = cuts_from.iter().map(|id| cut(id, "1", "3", "")).collect();
+    Plan::from_toml_str(&plan_with(META, &sources.concat(), &cuts, extra)).unwrap()
+}
+
+/// Every problem in `plan`, as displayed; empty when it is valid.
+fn all_problems(plan: &Plan) -> Vec<String> {
+    match plan.validate() {
+        Ok(()) => Vec::new(),
+        Err(errors) => errors.iter().map(ToString::to_string).collect(),
+    }
+}
+
+#[test]
+fn a_single_source_may_take_its_words_from_the_captions() {
+    let plan = plan_from(
+        &[source("a", None)],
+        &["a"],
+        &captions(Some("a.words.json")),
+    );
+    assert_eq!(all_problems(&plan), Vec::<String>::new());
+    assert_eq!(plan.caption_words("a"), Some("a.words.json"));
+}
+
+#[test]
+fn a_source_s_own_words_come_first() {
+    let own = plan_from(&[source("a", Some("own.json"))], &["a"], &captions(None));
+    assert_eq!(all_problems(&own), Vec::<String>::new());
+    assert_eq!(own.caption_words("a"), Some("own.json"));
+
+    let both = plan_from(
+        &[source("a", Some("own.json"))],
+        &["a"],
+        &captions(Some("shared.json")),
+    );
+    assert_eq!(all_problems(&both), Vec::<String>::new());
+    assert_eq!(both.caption_words("a"), Some("own.json"));
+    assert_eq!(both.caption_words("z"), None);
+}
+
+#[test]
+fn a_single_source_needs_words_for_its_captions() {
+    let plan = plan_from(&[source("a", None)], &["a"], &captions(None));
+    assert_eq!(
+        all_problems(&plan),
+        ["captions.words is required when source[0] has no words"]
+    );
+    assert_eq!(plan.caption_words("a"), None);
+}
+
+#[test]
+fn with_several_sources_each_needs_its_own_words() {
+    // `captions.words` is not used for any source when there are several.
+    let plan = plan_from(
+        &[
+            source("a", Some("a.json")),
+            source("b", None),
+            source("c", None),
+        ],
+        &["a", "b", "c", "b"],
+        &captions(Some("shared.json")),
+    );
+    assert_eq!(
+        all_problems(&plan),
+        [
+            "source[1].words is required: the plan has [captions] and more than one source",
+            "source[2].words is required: the plan has [captions] and more than one source",
+        ]
+    );
+    assert_eq!(plan.caption_words("a"), Some("a.json"));
+    assert_eq!(plan.caption_words("b"), None);
+}
+
+#[test]
+fn several_sources_with_their_own_words_are_valid() {
+    let plan = plan_from(
+        &[source("a", Some("a.json")), source("b", Some("b.json"))],
+        &["a", "b", "a"],
+        &captions(None),
+    );
+    assert_eq!(all_problems(&plan), Vec::<String>::new());
+    assert_eq!(plan.caption_words("b"), Some("b.json"));
+}
+
+#[test]
+fn sources_that_no_cut_uses_need_no_words() {
+    let several = plan_from(
+        &[source("a", Some("a.json")), source("b", None)],
+        &["a"],
+        &captions(None),
+    );
+    assert_eq!(all_problems(&several), Vec::<String>::new());
+
+    // With one source, a cut that names another id is the only problem.
+    let single = plan_from(&[source("a", None)], &["x"], &captions(None));
+    assert_eq!(
+        all_problems(&single),
+        [r#"cut[0].src must be the id of a [[source]], got "x""#]
+    );
+}
+
+#[test]
+fn without_captions_no_words_are_needed() {
+    let plan = plan_from(&[source("a", None), source("b", None)], &["a", "b"], "");
+    assert_eq!(all_problems(&plan), Vec::<String>::new());
+    assert_eq!(plan.caption_words("a"), None);
+}
+
+#[test]
+fn word_files_must_not_be_empty() {
+    // An empty file name is reported once, not also as missing.
+    let plan = plan_from(&[source("a", Some(""))], &["a"], &captions(Some("")));
+    assert_eq!(
+        all_problems(&plan),
+        [
+            "source[0].words must not be empty",
+            "captions.words must not be empty"
+        ]
+    );
+}
+
+#[test]
+fn caption_style_fields_have_defaults() {
+    // A single source with its own words, and a [captions] table with nothing in it.
+    let plan = plan_from(&[source("a", Some("a.words.json"))], &["a"], "[captions]\n");
+    assert_eq!(all_problems(&plan), Vec::<String>::new());
+    let captions = plan.captions().unwrap();
+    assert_eq!(captions.font(), None);
+    assert_eq!(captions.active(), Captions::DEFAULT_ACTIVE);
+    assert_eq!(captions.stroke(), Captions::DEFAULT_STROKE);
+    assert_eq!(
+        (Captions::DEFAULT_ACTIVE, Captions::DEFAULT_STROKE),
+        ("#FFC400", 10)
+    );
+
+    // Without any word timings, the captions need captions.words.
+    let bare = plan_from(&[source("a", None)], &["a"], "[captions]\n");
+    assert_eq!(
+        all_problems(&bare),
+        ["captions.words is required when source[0] has no words"]
+    );
+}
+
+#[test]
+fn caption_style_fields_are_checked_when_present() {
+    let captions =
+        "[captions]\nwords = \"w.json\"\nfont = \"Anton.ttf\"\nactive = \"#00ff00\"\nstroke = 0";
+    let plan = plan_from(&[source("a", None)], &["a"], captions);
+    assert_eq!(all_problems(&plan), Vec::<String>::new());
+    let captions = plan.captions().unwrap();
+    assert_eq!(
+        (captions.font(), captions.active(), captions.stroke()),
+        (Some("Anton.ttf"), "#00ff00", 0)
     );
 }
