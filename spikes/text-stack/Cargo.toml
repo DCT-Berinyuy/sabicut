@@ -1,0 +1,39 @@
+[package]
+name = "text-stack"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+description = "Sabicut F6 spike: binary size of drawing outlined, kerned text with rustybuzz or cosmic-text"
+
+[features]
+# Each binary needs exactly one stack, so `cargo tree --features <stack>` gives the
+# crates that stack downloads.
+rb = ["dep:rustybuzz"]
+ct = ["dep:cosmic-text"]
+
+[dependencies]
+tiny-skia = { version = "0.11.4", default-features = false, features = ["std", "simd"] }
+rustybuzz = { version = "0.20.1", optional = true }
+# Without fontconfig and sys-locale: cosmic-text at its smallest, with swash for outlines.
+cosmic-text = { version = "0.19", optional = true, default-features = false, features = ["std", "swash"] }
+
+[[bin]]
+name = "base"
+path = "src/bin/base.rs"
+
+[[bin]]
+name = "rb"
+path = "src/bin/rb.rs"
+required-features = ["rb"]
+
+[[bin]]
+name = "ct"
+path = "src/bin/ct.rs"
+required-features = ["ct"]
+
+[profile.release]
+strip = true
+
+# Standalone spike: an empty workspace table keeps it out of the main Sabicut workspace.
+[workspace]

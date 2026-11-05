@@ -1,0 +1,12 @@
+1
+00:00:00,100 --> 00:00:02,300
+Été comme hiver, le moulin tourne !
+
+2
+00:00:02,500 --> 00:00:04,500
+Ça, c’est l’œuvre de maître Cornille.
+
+3
+00:00:04,700 --> 00:00:07,300
+« Bravo » Où êtes-vous allés ?
+

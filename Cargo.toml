@@ -19,11 +19,19 @@ sabicut-core = { path = "crates/core", version = "0.1.0" }
 sabicut-analyze = { path = "crates/analyze", version = "0.1.0" }
 sabicut-plan = { path = "crates/plan", version = "0.1.0" }
 sabicut-render = { path = "crates/render", version = "0.1.0" }
+sabicut-overlay = { path = "crates/overlay", version = "0.1.0" }
 clap = { version = "4.6.7", features = ["derive"] }
+# PNG decoding and encoding for the overlay golden tests (tiny-skia uses the same crate).
+png = "0.17.16"
+# Text shaping (kerning, accents) for captions; re-exports ttf-parser for glyph outlines.
+rustybuzz = "0.20.1"
 schemars = "1.2.3"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 thiserror = "2.0.21"
+# Drawing captions: anti-aliased fills and strokes of glyph outlines, in pure Rust.
+# Without its PNG support, which only the overlay tests need (through `png`).
+tiny-skia = { version = "0.11.4", default-features = false, features = ["std", "simd"] }
 toml = "1.1.8"
 whisper-rs = "0.16.0"
 

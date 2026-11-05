@@ -1,6 +1,7 @@
 //! The safe-zone guide on preview stills: where TikTok, Instagram Reels and YouTube
 //! Shorts draw their own interface over a vertical video, so captions, faces and text
-//! can be kept clear of it.
+//! can be kept clear of it. The zones themselves are defined in `sabicut-overlay`,
+//! which lays captions and the hook out clear of them.
 //!
 //! The zones are the union of the three apps' organic (non-ad) layouts on a 1080×1920
 //! frame, rounded outwards, as measured by CapQA (capqa.app/guides/social-media-safe-zones,
@@ -16,51 +17,7 @@
 
 use std::fmt::Write as _;
 
-/// A region of the frame that platform UI covers, as fractions of the output frame
-/// (0 = left or top edge, 1 = right or bottom edge).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Zone {
-    /// What covers it.
-    pub name: &'static str,
-    /// Left edge.
-    pub left: f64,
-    /// Top edge.
-    pub top: f64,
-    /// Right edge.
-    pub right: f64,
-    /// Bottom edge.
-    pub bottom: f64,
-}
-
-/// The zones the guide shades.
-pub const ZONES: [Zone; 3] = [
-    // 240 px on 1920: clears the tallest top bar (Shorts, 234 px).
-    Zone {
-        name: "top bar",
-        left: 0.0,
-        top: 0.0,
-        right: 1.0,
-        bottom: 0.125,
-    },
-    // From y 1440 on 1920: clears the Shorts subscribe button (1480), the bottom of
-    // TikTok's action column (1536) and every caption and sound bar.
-    Zone {
-        name: "caption and buttons",
-        left: 0.0,
-        top: 0.75,
-        right: 1.0,
-        bottom: 1.0,
-    },
-    // x 918–1080 and y 480–1440 on 1080×1920: clears all three action columns above
-    // the bottom zone (they start at x 918 or further right, and at y 499 or lower).
-    Zone {
-        name: "action column",
-        left: 0.85,
-        top: 0.25,
-        right: 1.0,
-        bottom: 0.75,
-    },
-];
+pub use sabicut_overlay::safe_zone::{ZONES, Zone};
 
 /// Fill colour of the shaded zones.
 const SHADE: &str = "0xFF3B30@0.40";
@@ -113,40 +70,5 @@ mod tests {
                 "drawbox=x=918:y=480:w=162:h=960:color=0xFF3B30@0.40:t=fill",
             ]
         );
-    }
-
-    #[test]
-    fn zones_cover_every_measured_platform_element() {
-        // (x0, y0, x1, y1) on 1080×1920, from the table in the module docs.
-        let elements = [
-            (0, 0, 1080, 130),
-            (0, 0, 1080, 210),
-            (0, 0, 1080, 234),
-            (0, 1570, 1080, 1920),
-            (0, 1590, 1080, 1920),
-            (0, 1575, 1080, 1920),
-            (48, 1480, 228, 1560),
-            (918, 730, 1080, 1536),
-            (996, 614, 1080, 1460),
-            (936, 499, 1080, 1460),
-        ];
-        let covered = |x: u32, y: u32| {
-            ZONES.iter().any(|z| {
-                (f64::from(x) + 0.5) / 1080.0 >= z.left
-                    && (f64::from(x) + 0.5) / 1080.0 <= z.right
-                    && (f64::from(y) + 0.5) / 1920.0 >= z.top
-                    && (f64::from(y) + 0.5) / 1920.0 <= z.bottom
-            })
-        };
-        for (x0, y0, x1, y1) in elements {
-            for y in (y0..y1).step_by(4) {
-                for x in (x0..x1).step_by(4) {
-                    assert!(
-                        covered(x, y),
-                        "pixel {x},{y} of element {x0},{y0}-{x1},{y1}"
-                    );
-                }
-            }
-        }
     }
 }

@@ -10,8 +10,8 @@ get finished videos back. No internet, no data cost, no app to install.
 
 ## Status
 
-**Pre-alpha and time-boxed.** Sabicut can turn a hand-written plan into a vertical short,
-but without captions yet.
+**Pre-alpha and time-boxed.** Sabicut can turn a clip's speech into a plan, and a plan
+into a captioned vertical short.
 
 | Phase | Window | Exit criterion |
 |---|---|---|
@@ -23,8 +23,8 @@ If a phase misses its exit criterion by more than a week, work stops for a revie
 
 What works today is the edit-plan format (`plan.toml`) and its commands, offline
 transcription to word timings (`words.json`), transcript fixes (`fixes.toml`), plans
-written automatically from the words, and previews and rendering of plans, without
-captions so far.
+written automatically from the words, and previews and rendering of plans with
+word-by-word captions, a hook and subtitles.
 
 | Command | What it does |
 |---|---|
@@ -35,10 +35,12 @@ captions so far.
 | `sabicut fix <words.json> <fixes.toml>` | Applies transcript fixes to word timings and lists what changes |
 | `sabicut plan <media>...` | Writes an edit plan from the word timings: cuts pauses and false starts, crops to 9:16, zooms in on keywords |
 | `sabicut preview <plan.toml> --at 1.5,8,22` | Writes PNG stills at those output times and a contact sheet, optionally with the apps' safe zones shaded |
-| `sabicut render <plan.toml>` | Renders a 1080×1920 MP4 (frame-exact cuts, crop, zooms, HDR tone mapping, cleaned-up audio at −14 LUFS) and a cover JPG |
+| `sabicut render <plan.toml>` | Renders a 1080×1920 MP4 (frame-exact cuts, crop, zooms, HDR tone mapping, cleaned-up audio at −14 LUFS, word-by-word captions and the hook), a cover JPG and subtitles (SRT) |
+| `sabicut srt <plan.toml>` | Writes the plan's subtitles (SRT) without rendering |
 
-Captions and the Wi-Fi hub come next. How rendering and previews work, including how
-zooms move, is in [docs/render.md](docs/render.md).
+The Wi-Fi hub comes next. How rendering and previews work, including how zooms move, is
+in [docs/render.md](docs/render.md); how captions, the hook and subtitles are laid out
+is in [docs/captions.md](docs/captions.md).
 The full plan is in the [product requirements document](docs/PRD.md).
 
 ## Build and run
@@ -311,6 +313,8 @@ crates/core/     sabicut-core: plan types, schema v1, validation, rational time,
 crates/analyze/  sabicut-analyze: ffmpeg audio, Silero speech detection, whisper.cpp
 crates/plan/     sabicut-plan: the rules that write a plan from word timings (pauses,
                  false starts, zooms), with no dependency on the speech model or ffmpeg
+crates/overlay/  sabicut-overlay: captions, hook and subtitles (rustybuzz + tiny-skia),
+                 and the bundled Anton font
 crates/render/   sabicut-render: ffmpeg graph builder, render, preview stills
 crates/cli/      sabicut-cli: the `sabicut` command
 schema/          JSON Schemas of plan.toml (v1.json), words.json and fixes.toml,
@@ -368,3 +372,13 @@ at your option.
 Unless you explicitly state otherwise, any contribution intentionally submitted for
 inclusion in the work by you, as defined in the Apache-2.0 license, shall be dual licensed
 as above, without any additional terms or conditions.
+
+### Third-party material
+
+- **Anton font.** `crates/overlay/fonts/Anton-Regular.ttf` is Anton Regular, Copyright
+  2020 The Anton Project Authors, licensed under the SIL Open Font License 1.1
+  ([`crates/overlay/fonts/OFL.txt`](crates/overlay/fonts/OFL.txt)). It is embedded in the
+  `sabicut` binary as the default caption font; the OFL allows bundling it with software,
+  provided the license goes with it and the font is not sold on its own.
+- **Test speech.** The test clips in `crates/analyze/tests/fixtures/` are public-domain
+  LibriVox recordings (see the [fixtures README](crates/analyze/tests/fixtures/README.md)).

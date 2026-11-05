@@ -1,0 +1,25 @@
+[package]
+name = "sabicut-overlay"
+description = "Draws Sabicut's word-by-word captions and hook text as RGBA pictures, and writes subtitles"
+readme = "../../README.md"
+version.workspace = true
+edition.workspace = true
+# The crate embeds the Anton font (fonts/), which is under the SIL Open Font License 1.1.
+license = "(MIT OR Apache-2.0) AND OFL-1.1"
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+sabicut-core.workspace = true
+rustybuzz.workspace = true
+thiserror.workspace = true
+tiny-skia.workspace = true
+
+[dev-dependencies]
+png.workspace = true
+
+[lints]
+workspace = true

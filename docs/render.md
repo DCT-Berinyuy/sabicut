@@ -1,24 +1,23 @@
 # Rendering and previews
 
-`sabicut render` turns a plan into the finished vertical MP4 and a cover JPG (PRD F5).
-`sabicut preview` writes PNG stills and a contact sheet so you can check crops and zooms
-first (PRD F4). Both drive the `ffmpeg` binary as a subprocess (PRD §8) and share the
-code that builds the filter graph, so a still shows exactly what the render shows at the
-same time.
+`sabicut render` turns a plan into the finished vertical MP4, a cover JPG and subtitles
+(PRD F5). `sabicut preview` writes PNG stills and a contact sheet so you can check crops,
+zooms, captions and the hook first (PRD F4). Both drive the `ffmpeg` binary as a
+subprocess (PRD §8) and share the code that builds the filter graph and draws the
+captions, so a still shows exactly what the render shows at the same time.
 
-Captions, the hook text, the end card and the SRT are not drawn yet: they come with the
-overlay crate (F6). A plan's `[hook]` and `[captions]` are accepted and ignored, with a
-note.
+Captions, the hook and the subtitles are described in [captions.md](captions.md). The
+end card in PRD F5 is not drawn: plan schema v1 has nothing to say what it shows.
 
 ```sh
 sabicut preview plan.toml --at 1.5,8,22 --safe-zones   # stills + contact sheet
-sabicut render plan.toml                               # plan.mp4 + plan.jpg
+sabicut render plan.toml                               # plan.mp4 + plan.jpg + plan.srt
 sabicut render plan.toml -o short.mp4 --cover-at 3.2 --preset veryfast
 ```
 
 | Option | Meaning |
 |---|---|
-| `render -o, --output` | The MP4 to write. Default: the plan's path ending in `.mp4` |
+| `render -o, --output` | The MP4 to write. Default: the plan's path ending in `.mp4`. The subtitles go next to it, ending in `.srt`, when the plan has word timings |
 | `render --cover` | The cover JPG to write. Default: the video's path ending in `.jpg` |
 | `render --cover-at` | Output time of the cover frame in seconds. Default: 1 s, or the middle of a video shorter than 2 s |
 | `render --no-cover` | Write no cover |
@@ -52,8 +51,10 @@ Source paths are opened as local files only (`file:` URLs with
 2. **Loudness.** `loudnorm` measures the WAV (first pass).
 3. **Video.** One encoding ffmpeg runs for the whole render. Each cut is decoded by a
    short-lived ffmpeg of its own, one cut after another, which trims, crops, tone-maps,
-   scales and zooms it and pipes the raw frames to the encoder. The encoder adds the
-   overlays, normalizes the WAV (second loudness pass) and writes the MP4.
+   scales and zooms it and pipes the raw frames to the encoder. With captions, Sabicut
+   draws each frame's caption band and pipes it to the encoder too. The encoder adds the
+   captions, the hook and any other overlays, normalizes the WAV (second loudness pass)
+   and writes the MP4.
 
 A render first waits while a transcription (`sabicut analyze`) or another render runs on
 the same machine: they share one lock, so only one heavy job runs at a time (PRD H4).
@@ -216,9 +217,10 @@ and faster presets already look ahead 20 frames or fewer.
 ## Cover
 
 The cover is the frame of the **finished video** at `--cover-at`, as a full-size
-1080×1920 JPG (quality 2 of 31). It therefore includes captions once they are drawn. The
-default is 1 s in: late enough to miss a blink on the first frame, and inside the hook
-(the first 2 s) once hooks are drawn.
+1080×1920 JPG (quality 2 of 31), so it shows the captions of that moment. The default is
+1 s in: late enough to miss a blink on the first frame, and inside a hook of the usual
+2 s, after its entrance. A cover taken after the hook has gone gets the hook drawn on it
+anyway.
 
 ## Previews
 
@@ -261,13 +263,20 @@ side of a Reels ad, so treat the guide as the minimum.
 
 [capqa]: https://capqa.app/guides/social-media-safe-zones
 
-## Overlays (for F6)
+## Overlays
 
-`RenderOptions::overlays` is the extension point for captions, the hook and the end
-card. Each `Overlay` names a source (for now a local file: a PNG with transparency is
-held, a video is drawn frame by frame), a top-left position, and optionally the output
+Captions and the hook are overlays, and `RenderOptions::overlays` adds more on top of
+them. Each `Overlay` names a source, a top-left position, and optionally the output
 frames it is drawn on. It is placed with `overlay=x:y` after the cuts are joined, with
-`enable='between(n,…)'` for its frame window. This matches PRD §8: render only the
-caption band (about 1080×400 RGBA), place it with `overlay`, and draw other graphics only
-inside their time windows. The caption band will arrive as a new `OverlaySource` (raw
-RGBA frames piped to ffmpeg).
+`enable='between(n,…)'` for its frame window (PRD §8: draw graphics only inside their
+time windows). The sources are:
+
+| Source | What it is |
+|---|---|
+| `File` | A local image (held, like a PNG with transparency) or video (drawn frame by frame, its last frame held) |
+| `Rgba` | A local file of raw RGBA pictures, straight alpha, one per output frame from frame 0, the last held: the hook's animated pictures, and the pictures of a preview still |
+| `CaptionBand` | The caption band, raw RGBA pictures drawn for every output frame and piped to the encoder ([captions.md](captions.md#how-it-is-drawn)). Only `render` makes it |
+
+Raw RGBA pictures are converted to the video's colours explicitly (BT.709, limited
+range, 4:2:0 with alpha) before `overlay`, so every ffmpeg version gives the same
+colours. Every overlay position and size is even, to line up with 4:2:0 chroma.

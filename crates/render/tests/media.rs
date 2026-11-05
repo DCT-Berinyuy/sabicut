@@ -13,7 +13,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
-use sabicut_core::{Plan, Timeline};
+use sabicut_core::{Plan, SpeechSegment, Timeline, Transcript, Word};
+use sabicut_overlay::{Font, Graphics, WordTimings};
 use sabicut_render::{
     CONTACT_SHEET_NAME, Ffmpeg, HdrTransfer, OpenError, Preset, PreviewOptions, Project,
     RenderError, RenderOptions, RenderReport, ToolError, preview, render,
@@ -212,6 +213,7 @@ fn render_plan(dir: &Path, plan: &Plan) -> (Project, RenderReport) {
         cover_at: None,
         preset: Preset::Ultrafast,
         overlays: Vec::new(),
+        subtitles: None,
     };
     let report = render(tools(), &project, &options, &mut |_| {}).unwrap();
     (project, report)
@@ -538,6 +540,154 @@ fn landscape_60fps_render_is_frame_exact_and_normalized() {
     assert!(middle < 0.5, "middle changed ({middle})");
 }
 
+/// The pixels of `crop` (`w:h:x:y`) in frame `frame` of `path`, as RGB.
+fn region_rgb(path: &Path, frame: u64, crop: &str) -> Vec<u8> {
+    ffmpeg_stdout(&[
+        "-i",
+        path.to_str().unwrap(),
+        "-vf",
+        &format!("select=eq(n\\,{frame}),crop={crop},format=rgb24"),
+        "-frames:v",
+        "1",
+        "-f",
+        "rawvideo",
+        "-",
+    ])
+}
+
+/// How many pixels are close to the caption gold, #FFC400.
+fn gold_pixels(rgb: &[u8]) -> usize {
+    rgb.chunks(3)
+        .filter(|p| p[0] >= 200 && (150..=225).contains(&p[1]) && p[2] <= 90)
+        .count()
+}
+
+#[test]
+fn captions_and_hook_are_drawn_as_in_the_preview_with_subtitles() {
+    let _lock = one_at_a_time();
+    let dir = scratch("captions");
+    let (plan, _) = plan(
+        &dir,
+        &landscape(),
+        0.5,
+        "[[cut]]\nsrc = \"a\"\nin = 1.0\nout = 4.0\n\
+         [[cut]]\nsrc = \"a\"\nin = 6.0\nout = 9.0\n\
+         [hook]\ntext = \"Stop leaking your API keys\"\ndur = 2.0\n\
+         [captions]\nwords = \"talk.words.json\"\nkeywords = [\"Supabase\"]\n\
+         font = \"Anton-Regular.ttf\"\nactive = \"#FFC400\"\nstroke = 10\n",
+    );
+    let timeline = Timeline::from_plan(&plan).unwrap();
+    let words = [
+        ("Rust", 1.2, 1.6),
+        ("and", 1.6, 1.8),
+        ("Supabase", 1.8, 2.6),
+        ("together.", 2.6, 3.4),
+        ("Ship", 6.2, 6.6),
+        ("it", 6.6, 6.8),
+        ("tonight!", 6.8, 7.8),
+    ];
+    let transcript = Transcript::new(
+        "landscape.mp4",
+        "en",
+        "test",
+        12.0,
+        vec![SpeechSegment::new(1.0, 9.0)],
+        words
+            .iter()
+            .map(|&(text, start, end)| Word::new(text, start, end, 0.9))
+            .collect(),
+    )
+    .unwrap();
+    let mut timings = WordTimings::new();
+    timings.insert("a", transcript);
+    let graphics = Graphics::new(&plan, &timeline, &timings, &Font::bundled()).unwrap();
+    let band = graphics.band().unwrap();
+    let hook = graphics.hook().unwrap().placement;
+    let band_crop = format!("{}:{}:{}:{}", band.width, band.height, band.x, band.y);
+    let hook_crop = format!("{}:{}:{}:{}", hook.width, hook.height, hook.x, hook.y);
+    let plain = Project::open(tools(), &plan, &dir).unwrap();
+    let project = plain.clone().with_graphics(Some(graphics.clone()));
+    let options = RenderOptions {
+        output: dir.join("out.mp4"),
+        cover: Some(dir.join("cover.jpg")),
+        cover_at: Some(3.5),
+        preset: Preset::Ultrafast,
+        overlays: Vec::new(),
+        subtitles: Some(dir.join("out.srt")),
+    };
+    let report = render(tools(), &project, &options, &mut |_| {}).unwrap();
+    let output = dir.join("out.mp4");
+    assert_eq!(report.frames, 180);
+    assert_output_properties(&output, &timeline);
+    let (srt, cues) = report.subtitles.clone().unwrap();
+    assert_eq!(cues, 2);
+    assert_eq!(
+        std::fs::read_to_string(&srt).unwrap(),
+        graphics.subtitles().unwrap()
+    );
+
+    // "Supabase" (output frames 24 to 48) is active at 1.3 s: gold in the band.
+    assert!(gold_pixels(&region_rgb(&output, 39, &band_crop)) > 2000);
+
+    // Preview stills show the captions and hook exactly as the render does.
+    let times = [0.5, 1.3, 2.5];
+    let stills = preview(
+        tools(),
+        &project,
+        &PreviewOptions {
+            times: times.to_vec(),
+            out_dir: dir.join("stills"),
+            safe_zones: false,
+        },
+    )
+    .unwrap();
+    let plain_stills = preview(
+        tools(),
+        &plain,
+        &PreviewOptions {
+            times: times.to_vec(),
+            out_dir: dir.join("plain"),
+            safe_zones: false,
+        },
+    )
+    .unwrap();
+    for (still, plain) in stills.stills.iter().zip(&plain_stills.stills) {
+        let diff = difference(
+            &small_rgb(&output, Some(still.frame), None),
+            &small_rgb(&still.path, None, None),
+        );
+        assert!(
+            diff < 3.0,
+            "still at frame {} differs by {diff}",
+            still.frame
+        );
+        // The hook shows on its first 60 frames only; captions show in all three.
+        let hook_change = difference(
+            &small_rgb(&still.path, None, Some(&hook_crop)),
+            &small_rgb(&plain.path, None, Some(&hook_crop)),
+        );
+        let band_change = difference(
+            &small_rgb(&still.path, None, Some(&band_crop)),
+            &small_rgb(&plain.path, None, Some(&band_crop)),
+        );
+        if still.frame < 60 {
+            assert!(hook_change > 10.0, "no hook at frame {}", still.frame);
+        } else {
+            assert!(hook_change < 0.5, "hook at frame {}", still.frame);
+        }
+        assert!(band_change > 5.0, "no captions at frame {}", still.frame);
+    }
+
+    // The cover is taken after the hook, so the hook is drawn on it.
+    let (cover, frame) = report.cover.clone().unwrap();
+    assert_eq!(frame, 105);
+    let cover_hook = difference(
+        &small_rgb(&cover, None, Some(&hook_crop)),
+        &small_rgb(&output, Some(frame), Some(&hook_crop)),
+    );
+    assert!(cover_hook > 10.0, "no hook on the cover ({cover_hook})");
+}
+
 #[test]
 fn rotated_portrait_source_comes_out_upright() {
     let _lock = one_at_a_time();
@@ -802,6 +952,7 @@ fn hdr_without_zscale_fails_with_a_clear_message() {
         cover_at: None,
         preset: Preset::Veryfast,
         overlays: Vec::new(),
+        subtitles: None,
     };
     let error = render(&tools, &project, &options, &mut |_| {}).unwrap_err();
     assert!(

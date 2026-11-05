@@ -12,21 +12,30 @@
 //!    (second pass) and encodes H.264 and AAC. Memory therefore holds one decoder and
 //!    the encoder, however many cuts the plan has.
 //!
+//! Captions arrive as the caption band: for every output frame, its RGBA picture is
+//! drawn here and piped to the encoder by a thread of its own, next to the video. The
+//! hook's few animated pictures go in a scratch file. Both are placed with `overlay`,
+//! the hook only on its frames (PRD §8).
+//!
 //! The result is checked (frame count, loudness) before it replaces the output file,
-//! so a failed render never leaves a broken video behind.
+//! so a failed render never leaves a broken video behind. The subtitles (SRT) are
+//! written with it.
 
 use std::ffi::OsString;
 use std::fmt;
-use std::fs;
-use std::io::{self, Read, Write};
+use std::fs::{self, File};
+use std::io::{self, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::str::FromStr;
 
 use crate::error::RenderError;
+use sabicut_overlay::Graphics;
+
 use crate::graph::{
-    AUDIO_CLEANUP, AUDIO_FILTERS, Graph, HDR_FILTERS, Inputs, Overlay, OverlaySource, SAMPLE_RATE,
-    VIDEO_FILTERS, ZOOM_FILTERS, audio_chain, overlay_chain, seek_before, silence, video_chain,
+    AUDIO_CLEANUP, AUDIO_FILTERS, CaptionBand, Graph, HDR_FILTERS, Inputs, OVERLAY_FILTERS,
+    Overlay, OverlaySource, SAMPLE_RATE, VIDEO_FILTERS, ZOOM_FILTERS, audio_chain, overlay_chain,
+    seek_before, silence, video_chain,
 };
 use crate::loudness::{self, Loudness};
 use crate::probe::file_url;
@@ -41,8 +50,8 @@ pub const MAX_LOOKAHEAD: u32 = 20;
 /// AAC bit rate (PRD F5).
 pub const AUDIO_BITRATE: &str = "160k";
 /// Where the cover is taken when no time is given, in seconds: one second in, or the
-/// middle of a shorter video. Late enough to miss a blink on the first frame; inside
-/// the hook (the first 2 s) once hooks are drawn.
+/// middle of a shorter video. Late enough to miss a blink on the first frame, and
+/// inside a hook of the usual 2 s, after its entrance.
 pub const DEFAULT_COVER_SECONDS: f64 = 1.0;
 
 /// x264's speed preset: slower presets compress better. PRD §8: `medium` for personal
@@ -152,8 +161,12 @@ pub struct RenderOptions {
     pub cover_at: Option<f64>,
     /// x264 speed preset.
     pub preset: Preset,
-    /// Pictures drawn over the video, in order (none until captions arrive in F6).
+    /// Pictures drawn over the video, in order, on top of the project's captions and
+    /// hook.
     pub overlays: Vec<Overlay>,
+    /// The subtitles (SRT) to write. They are written only when the project's graphics
+    /// have word timings for every source the cuts use.
+    pub subtitles: Option<PathBuf>,
 }
 
 /// A step of the render, for progress reports.
@@ -190,6 +203,8 @@ pub struct RenderReport {
     pub frames: u64,
     /// The cover written, and the output frame it shows.
     pub cover: Option<(PathBuf, u64)>,
+    /// The subtitles written, and how many cues they have.
+    pub subtitles: Option<(PathBuf, usize)>,
     /// Loudness of the cut audio before normalization.
     pub loudness_before: Loudness,
     /// Loudness of the output's audio, measured on the encoded file.
@@ -205,7 +220,10 @@ pub fn render(
     progress: &mut dyn FnMut(Progress),
 ) -> Result<RenderReport, RenderError> {
     check_tools(tools, project, options)?;
-    for path in std::iter::once(&options.output).chain(&options.cover) {
+    let outputs = std::iter::once(&options.output)
+        .chain(&options.cover)
+        .chain(&options.subtitles);
+    for path in outputs {
         refuse_to_overwrite_a_source(project, path)?;
     }
     // Check the cover time before the long part.
@@ -271,19 +289,74 @@ pub fn render(
             if let Some(dir) = path.parent().filter(|dir| !dir.as_os_str().is_empty()) {
                 fs::create_dir_all(dir).map_err(RenderError::io(dir))?;
             }
-            extract_frame(tools, &encoded, frame, project.timeline().fps(), path)?;
+            let hook = cover_hook(project, &work, frame)?;
+            let fps = project.timeline().fps();
+            extract_frame(tools, &encoded, frame, fps, path, hook.as_ref())?;
             Some((path.clone(), frame))
         }
         _ => None,
     };
+    let subtitles = write_subtitles(project, options, &work)?;
     fs::rename(&encoded, &options.output).map_err(RenderError::io(&options.output))?;
     Ok(RenderReport {
         output: options.output.clone(),
         frames,
         cover,
+        subtitles,
         loudness_before,
         loudness,
     })
+}
+
+/// Writes the subtitles next to the video, if asked and the project has word timings:
+/// first in the scratch directory, then moved into place, so a failure never leaves
+/// half a file.
+fn write_subtitles(
+    project: &Project,
+    options: &RenderOptions,
+    work: &WorkDir,
+) -> Result<Option<(PathBuf, usize)>, RenderError> {
+    let (Some(path), Some(graphics)) = (&options.subtitles, project.graphics()) else {
+        return Ok(None);
+    };
+    let Some(cues) = graphics.cues() else {
+        return Ok(None);
+    };
+    let fps = project.timeline().fps();
+    let scratch = work.write("subtitles.srt", &sabicut_overlay::srt::to_srt(&cues, fps))?;
+    if let Some(dir) = path.parent().filter(|dir| !dir.as_os_str().is_empty()) {
+        fs::create_dir_all(dir).map_err(RenderError::io(dir))?;
+    }
+    fs::rename(&scratch, path).map_err(RenderError::io(path))?;
+    Ok(Some((path.clone(), cues.len())))
+}
+
+/// The hook to draw on a cover taken after the hook has gone: its still picture, in a
+/// scratch file. `None` if the plan has no hook or the cover is taken during it.
+fn cover_hook(
+    project: &Project,
+    work: &WorkDir,
+    frame: u64,
+) -> Result<Option<Overlay>, RenderError> {
+    let Some(graphics) = project.graphics() else {
+        return Ok(None);
+    };
+    let Some(hook) = graphics.hook().filter(|hook| frame >= hook.frames.end) else {
+        return Ok(None);
+    };
+    let path = work.file("cover-hook.rgba");
+    let still = hook.animated.saturating_sub(1);
+    fs::write(&path, graphics.painter().hook_rgba(still)).map_err(RenderError::io(&path))?;
+    Ok(Some(Overlay {
+        source: OverlaySource::Rgba {
+            path,
+            width: hook.placement.width,
+            height: hook.placement.height,
+        },
+        x: hook.placement.x,
+        y: hook.placement.y,
+        frames: None,
+    }))
 }
 
 /// Fails if `path` is one of the project's source clips, which writing it would destroy.
@@ -316,8 +389,11 @@ fn check_tools(
     if project.tone_maps() {
         tools.require_filters(HDR_FILTERS, "tone-map HDR (PQ or HLG) video to SDR")?;
     }
+    if project.draws_graphics() {
+        tools.require_filters(OVERLAY_FILTERS, "draw captions and the hook")?;
+    }
     if !options.overlays.is_empty() {
-        tools.require_filters(&["overlay"], "draw overlays")?;
+        tools.require_filters(OVERLAY_FILTERS, "draw overlays")?;
     }
     tools.require_encoder("libx264", "encode H.264 video")?;
     tools.require_encoder("aac", "encode AAC audio")?;
@@ -423,7 +499,8 @@ pub(crate) fn measure_loudness(tools: &Ffmpeg, path: &Path) -> Result<Loudness, 
 /// Encodes the video. Each cut is decoded by its own ffmpeg, one cut after another,
 /// and its frames are piped raw into a single encoding ffmpeg. So memory holds one
 /// decoder and the encoder however many cuts there are, and every cut is checked to
-/// deliver exactly its number of frames.
+/// deliver exactly its number of frames. With captions, a second thread draws each
+/// frame's caption band and pipes it to the encoder.
 #[allow(clippy::too_many_arguments)]
 fn render_video(
     tools: &Ffmpeg,
@@ -436,11 +513,20 @@ fn render_video(
     progress: &mut dyn FnMut(Progress),
 ) -> Result<(), RenderError> {
     let fps = project.timeline().fps();
-    let total = project.timeline().total_frames();
     let (width, height) = project.out();
-    let frame_bytes = u64::from(width) * u64::from(height) * 3 / 2;
+    let frame_bytes = usize::try_from(u64::from(width) * u64::from(height) * 3 / 2)
+        .map_err(|_| RenderError::Pipe)?;
 
-    let script = work.write("encode.graph", &encoder_graph(options, loudness))?;
+    // Inputs 1 and up; 0 is the raw video on stdin. The WAV, then the overlays.
+    let mut inputs = Inputs::default();
+    inputs.add_file(wav);
+    let drawn = graphics_overlays(project, work)?;
+    let overlays: Vec<(usize, &Overlay)> = drawn
+        .iter()
+        .chain(&options.overlays)
+        .map(|overlay| (1 + inputs.add_overlay(overlay, fps), overlay))
+        .collect();
+    let script = work.write("encode.graph", &encoder_graph(&overlays, loudness))?;
     let mut args = base_args("error");
     args.extend(
         [
@@ -460,108 +546,247 @@ fn render_video(
         ]
         .map(OsString::from),
     );
-    let mut inputs = Inputs::default();
-    // Inputs 1 and up; 0 is the raw video on stdin.
-    inputs.add_file(wav);
-    for overlay in &options.overlays {
-        match &overlay.source {
-            OverlaySource::File(path) => inputs.add_file(path),
-        };
-    }
     args.extend_from_slice(inputs.args());
     args.extend(tools.graph_script_args(&script));
     args.extend(encoder_options(options.preset, fps));
     args.push(encoded.as_os_str().to_owned());
-    let mut encoder = tools.spawn_ffmpeg(&args, Stdio::piped(), Stdio::null())?;
-    let mut sink = encoder.take_stdin().ok_or(RenderError::Pipe)?;
 
-    let mut done = 0;
-    let mut buffer = vec![0_u8; 1 << 20];
-    for (index, cut) in project.cuts().iter().enumerate() {
-        let graph = format!(
-            "[0:V:0]{}[v]\n",
-            video_chain(&cut.spec, &cut.curve, &cut.segment, 0..cut.segment.frames())
-        );
-        let script = work.write(&format!("cut-{index}.graph"), &graph)?;
-        let mut cut_inputs = Inputs::default();
-        cut_inputs.add_seeked(
-            &cut.path,
-            seek_before(cut.segment.source_in(), fps),
-            cut.spec.decoder_threads(),
-        );
-        let mut args = base_args("error");
-        args.extend(SOURCE_TIMESTAMPS.map(OsString::from));
-        args.extend_from_slice(cut_inputs.args());
-        args.extend(tools.graph_script_args(&script));
-        args.extend(
-            [
-                "-map",
-                "[v]",
-                "-fps_mode",
-                "passthrough",
-                "-f",
-                "rawvideo",
-                "-pix_fmt",
-                "yuv420p",
-                "pipe:1",
-            ]
-            .map(OsString::from),
-        );
-        let mut decoder = tools.spawn_ffmpeg(&args, Stdio::null(), Stdio::piped())?;
-        let mut frames = decoder.take_stdout().ok_or(RenderError::Pipe)?;
-        let mut copied: u64 = 0;
-        loop {
-            let read = match frames.read(&mut buffer) {
-                Ok(0) => break,
-                Ok(read) => read,
-                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                Err(_) => return Err(RenderError::Pipe),
-            };
-            let chunk = buffer.get(..read).unwrap_or_default();
-            if sink.write_all(chunk).is_err() {
-                // The encoder stopped reading: it failed, and its error says why.
-                drop(decoder);
-                drop(sink);
-                return Err(encoder
-                    .finish()
-                    .err()
-                    .map_or(RenderError::Pipe, RenderError::from));
-            }
-            let before = copied / frame_bytes;
-            copied += read as u64;
-            if copied / frame_bytes > before {
-                progress(Progress::Video {
-                    done: done + copied / frame_bytes,
-                    total,
-                });
+    // The caption band goes in on the encoder's standard output (see BAND_PIPE).
+    let (band_reader, band) = match project.graphics().filter(|g| g.band().is_some()) {
+        Some(graphics) => {
+            let (reader, writer) = io::pipe().map_err(|_| RenderError::Pipe)?;
+            (Some(reader), Some((writer, graphics.painter())))
+        }
+        None => (None, None),
+    };
+    let stdout = band_reader.map_or_else(Stdio::null, Stdio::from);
+    let mut encoder = tools.spawn_ffmpeg(&args, Stdio::piped(), stdout)?;
+    let video = encoder.take_stdin().ok_or(RenderError::Pipe)?;
+    let total = project.timeline().total_frames();
+    let mut feed = Feed {
+        video,
+        frame: vec![0; frame_bytes],
+        done: 0,
+        total,
+    };
+    // ffmpeg opens its inputs one after another and reads ahead in each while it does,
+    // so each pipe gets a writer of its own: this thread writes the video, another the
+    // caption band. ffmpeg's queues keep the band at most a few frames ahead.
+    std::thread::scope(|scope| {
+        let band_writer = band.map(|(mut pipe, mut painter)| {
+            scope.spawn(move || -> io::Result<()> {
+                for frame in 0..total {
+                    pipe.write_all(painter.band_rgba(frame))?;
+                }
+                Ok(())
+            })
+        });
+        for index in 0..project.cuts().len() {
+            match feed_cut(tools, project, work, index, &mut feed, progress) {
+                Ok(()) => {}
+                // Returning drops the encoder, which stops it, so the band writer
+                // stops too.
+                Err(Stop::Failed(error)) => return Err(error),
+                Err(Stop::Encoder) => {
+                    // The encoder stopped reading: it failed, and its error says why.
+                    drop(feed);
+                    return Err(encoder
+                        .finish()
+                        .err()
+                        .map_or(RenderError::Pipe, RenderError::from));
+                }
             }
         }
-        decoder.finish()?;
-        let want = cut.segment.frames();
-        if copied != want * frame_bytes {
-            return Err(RenderError::CutFrames {
-                cut: index,
-                got: copied / frame_bytes,
-                want,
-            });
+        // Closing the video pipe (and the band pipe, once all its frames are written)
+        // tells the encoder the video is complete.
+        drop(feed);
+        encoder.finish()?;
+        match band_writer.map(std::thread::ScopedJoinHandle::join) {
+            Some(Ok(Err(_)) | Err(_)) => Err(RenderError::Pipe),
+            Some(Ok(Ok(()))) | None => Ok(()),
         }
-        done += want;
+    })
+}
+
+/// Where the video frames go: the encoder's standard input.
+struct Feed {
+    video: std::process::ChildStdin,
+    /// One raw video frame.
+    frame: Vec<u8>,
+    /// Output frames written so far.
+    done: u64,
+    total: u64,
+}
+
+/// Why feeding the encoder stopped.
+enum Stop {
+    /// The encoder stopped reading: it failed.
+    Encoder,
+    /// Something else failed.
+    Failed(RenderError),
+}
+
+impl From<RenderError> for Stop {
+    fn from(error: RenderError) -> Self {
+        Self::Failed(error)
     }
-    drop(sink);
-    encoder.finish()?;
+}
+
+impl Feed {
+    /// Writes the frame in `self.frame`.
+    fn write_frame(&mut self) -> Result<(), Stop> {
+        self.video
+            .write_all(&self.frame)
+            .map_err(|_| Stop::Encoder)?;
+        self.done += 1;
+        Ok(())
+    }
+}
+
+/// Decodes cut `index` with its own ffmpeg and writes its frames to `feed`.
+fn feed_cut(
+    tools: &Ffmpeg,
+    project: &Project,
+    work: &WorkDir,
+    index: usize,
+    feed: &mut Feed,
+    progress: &mut dyn FnMut(Progress),
+) -> Result<(), Stop> {
+    let fps = project.timeline().fps();
+    let cut = project.cuts().get(index).ok_or(RenderError::Pipe)?;
+    let graph = format!(
+        "[0:V:0]{}[v]\n",
+        video_chain(&cut.spec, &cut.curve, &cut.segment, 0..cut.segment.frames())
+    );
+    let script = work.write(&format!("cut-{index}.graph"), &graph)?;
+    let mut cut_inputs = Inputs::default();
+    cut_inputs.add_seeked(
+        &cut.path,
+        seek_before(cut.segment.source_in(), fps),
+        cut.spec.decoder_threads(),
+    );
+    let mut args = base_args("error");
+    args.extend(SOURCE_TIMESTAMPS.map(OsString::from));
+    args.extend_from_slice(cut_inputs.args());
+    args.extend(tools.graph_script_args(&script));
+    args.extend(
+        [
+            "-map",
+            "[v]",
+            "-fps_mode",
+            "passthrough",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "yuv420p",
+            "pipe:1",
+        ]
+        .map(OsString::from),
+    );
+    let mut decoder = tools
+        .spawn_ffmpeg(&args, Stdio::null(), Stdio::piped())
+        .map_err(RenderError::from)?;
+    let mut frames = decoder.take_stdout().ok_or(RenderError::Pipe)?;
+    let mut copied: u64 = 0;
+    // Whole frames go to the encoder; a short read means the decoder ended, and any
+    // bytes of a partial frame mean it ended mid-frame.
+    let partial = loop {
+        let read = read_full(&mut frames, &mut feed.frame).map_err(|_| RenderError::Pipe)?;
+        if read < feed.frame.len() {
+            break read > 0;
+        }
+        feed.write_frame()?;
+        copied += 1;
+        progress(Progress::Video {
+            done: feed.done,
+            total: feed.total,
+        });
+    };
+    decoder.finish().map_err(RenderError::from)?;
+    let want = cut.segment.frames();
+    if partial || copied != want {
+        return Err(RenderError::CutFrames {
+            cut: index,
+            got: copied,
+            want,
+        }
+        .into());
+    }
     Ok(())
 }
 
-/// The encoder's graph: raw frames on input 0 tagged BT.709, overlays on top, and the
-/// audio (input 1) normalized with the second loudness pass.
-fn encoder_graph(options: &RenderOptions, loudness: &Loudness) -> String {
+/// Reads until `buffer` is full or the stream ends; returns how many bytes it read.
+fn read_full(reader: &mut impl Read, buffer: &mut [u8]) -> io::Result<usize> {
+    let mut filled = 0;
+    while let Some(rest) = buffer.get_mut(filled..).filter(|rest| !rest.is_empty()) {
+        match reader.read(rest) {
+            Ok(0) => break,
+            Ok(read) => filled += read,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(filled)
+}
+
+/// The project's hook and caption band, as overlays: the hook's animated pictures are
+/// written to a scratch file (its last picture is held to the end of its frames), and
+/// the band is piped while the video is encoded.
+fn graphics_overlays(project: &Project, work: &WorkDir) -> Result<Vec<Overlay>, RenderError> {
+    let Some(graphics) = project.graphics() else {
+        return Ok(Vec::new());
+    };
+    let mut overlays = Vec::new();
+    if let Some(hook) = graphics.hook() {
+        let path = work.file("hook.rgba");
+        write_hook(graphics, hook.animated, &path)?;
+        overlays.push(Overlay {
+            source: OverlaySource::Rgba {
+                path,
+                width: hook.placement.width,
+                height: hook.placement.height,
+            },
+            x: hook.placement.x,
+            y: hook.placement.y,
+            frames: Some(hook.frames),
+        });
+    }
+    if let Some(band) = graphics.band() {
+        overlays.push(Overlay {
+            source: OverlaySource::CaptionBand(CaptionBand::new(band.width, band.height)),
+            x: band.x,
+            y: band.y,
+            frames: None,
+        });
+    }
+    Ok(overlays)
+}
+
+/// Writes the hook's first `frames` pictures to `path` as raw RGBA.
+fn write_hook(graphics: &Graphics, frames: u64, path: &Path) -> Result<(), RenderError> {
+    let error = RenderError::io(path);
+    let write = || -> io::Result<()> {
+        let mut file = BufWriter::new(File::create(path)?);
+        let mut painter = graphics.painter();
+        for frame in 0..frames.max(1) {
+            file.write_all(painter.hook_rgba(frame))?;
+        }
+        file.flush()
+    };
+    write().map_err(error)
+}
+
+/// The encoder's graph: raw frames on input 0 tagged BT.709, overlays on top (each with
+/// the input index of its pictures), and the audio (input 1) normalized with the second
+/// loudness pass.
+fn encoder_graph(overlays: &[(usize, &Overlay)], loudness: &Loudness) -> String {
     let mut graph = Graph::default();
     graph.chain(
         &["0:v:0"],
         "setparams=range=tv:color_primaries=bt709:color_trc=bt709:colorspace=bt709",
         &["vbase"],
     );
-    let video = overlay_chain(&mut graph, "vbase", &options.overlays, 2);
+    let video = overlay_chain(&mut graph, "vbase", overlays, "");
     graph.chain(&[&video], "null", &["vout"]);
     // loudnorm works at 192 kHz, and in dynamic mode (used when one gain cannot reach
     // the target, or the loudness range is 0) its timestamps jump by tens of
@@ -661,13 +886,18 @@ pub(crate) fn count_frames(tools: &Ffmpeg, path: &Path) -> Result<u64, RenderErr
     Ok(text.trim().trim_end_matches(',').parse().unwrap_or(0))
 }
 
-/// Writes output frame `frame` of the video at `path` to a JPG at `jpg`.
+/// How the cover's frame becomes a JPG: full range, as JPEG expects.
+const COVER_FILTERS: &str = "scale=out_range=pc,format=yuvj420p";
+
+/// Writes output frame `frame` of the video at `path` to a JPG at `jpg`, with
+/// `overlay` drawn on it if given.
 fn extract_frame(
     tools: &Ffmpeg,
     path: &Path,
     frame: u64,
     fps: u32,
     jpg: &Path,
+    overlay: Option<&Overlay>,
 ) -> Result<(), RenderError> {
     // Seek to the frame's own timestamp (rounded down to the microsecond): ffmpeg then
     // decodes from the keyframe before and outputs the first frame at or after it.
@@ -676,14 +906,23 @@ fn extract_frame(
     let mut args = base_args("error");
     args.extend(["-protocol_whitelist", "file", "-ss", &at, "-i"].map(OsString::from));
     args.push(file_url(path));
+    match overlay {
+        None => args.extend(["-map", "0:v:0", "-vf", COVER_FILTERS].map(OsString::from)),
+        Some(overlay) => {
+            let mut inputs = Inputs::default();
+            let input = 1 + inputs.add_overlay(overlay, fps);
+            args.extend_from_slice(inputs.args());
+            let mut graph = Graph::default();
+            let top = overlay_chain(&mut graph, "0:v:0", &[(input, overlay)], "c");
+            graph.chain(&[&top], COVER_FILTERS, &["cover"]);
+            args.extend(["-filter_complex".into(), graph.finish().into()]);
+            args.extend(["-map", "[cover]"].map(OsString::from));
+        }
+    }
     args.extend(
         [
-            "-map",
-            "0:v:0",
             "-frames:v",
             "1",
-            "-vf",
-            "scale=out_range=pc,format=yuvj420p",
             "-c:v",
             "mjpeg",
             "-q:v",
