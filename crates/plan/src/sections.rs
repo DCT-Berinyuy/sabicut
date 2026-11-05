@@ -48,9 +48,31 @@ pub(crate) struct SourceCuts {
     pub kept_false_starts: Vec<Range<usize>>,
 }
 
-/// Plans one source. `norms` are its words, normalized.
+/// How far past the video's end, in microseconds, a frame boundary still counts as
+/// within it. ffprobe prints times rounded to the microsecond, and the video's end is
+/// worked out from up to three of them: the video's start, the file's, and the video's
+/// duration.
+const VIDEO_END_SLACK_US: i64 = 2;
+
+/// The last frame boundary that a source's cuts can reach: where its audio ends (the
+/// duration of its word timings) or, if its video ends sooner, where the video does.
+pub(crate) fn end_of_media(audio: f64, video: Option<f64>, grid: Grid) -> i64 {
+    let audio_end = grid.at_or_before(micros(audio));
+    match video {
+        Some(video) => {
+            // Capped to the audio first, which also keeps the arithmetic in range.
+            let video = micros(video.max(0.0).min(audio));
+            audio_end.min(grid.at_or_before(video + VIDEO_END_SLACK_US))
+        }
+        None => audio_end,
+    }
+}
+
+/// Plans one source whose cuts end by frame boundary `end_of_media` ([`end_of_media`]).
+/// `norms` are its words, normalized.
 pub(crate) fn plan_source(
     transcript: &Transcript,
+    end_of_media: i64,
     norms: &[String],
     options: &Options,
     grid: Grid,
@@ -77,7 +99,7 @@ pub(crate) fn plan_source(
     let edges = Edges {
         words,
         speech: transcript.speech(),
-        end_of_media: grid.at_or_before(micros(transcript.duration())),
+        end_of_media,
         grid,
         pad_before: micros(air.pad_before),
         pad_after: micros(air.pad_after),
@@ -94,9 +116,12 @@ pub(crate) fn plan_source(
         let start = edges
             .start(first)
             .unwrap_or_else(|| edges.fallback(first, true));
+        // The media may end (with the video) before the speech does: no section runs
+        // past it, and one that this leaves too short is dropped like any other.
         let end = edges
             .end(last)
-            .unwrap_or_else(|| edges.fallback(last, false));
+            .unwrap_or_else(|| edges.fallback(last, false))
+            .min(edges.end_of_media);
         if end - start < min_keep.max(1) {
             short.push(group);
         } else {
@@ -319,12 +344,97 @@ mod tests {
     }
 
     fn plan(transcript: &Transcript) -> SourceCuts {
+        plan_with_video(transcript, None)
+    }
+
+    /// Plans `transcript` at 30 fps, for a clip whose video ends at `video_end`.
+    fn plan_with_video(transcript: &Transcript, video_end: Option<f64>) -> SourceCuts {
         let norms: Vec<String> = transcript
             .words()
             .iter()
             .map(|w| crate::text::normalize(w.text()))
             .collect();
-        plan_source(transcript, &norms, &Options::default(), Grid::new(30))
+        let grid = Grid::new(30);
+        let end = end_of_media(transcript.duration(), video_end, grid);
+        plan_source(transcript, end, &norms, &Options::default(), grid)
+    }
+
+    fn kept(cuts: &SourceCuts) -> Vec<(i64, i64)> {
+        cuts.sections.iter().map(|s| (s.start, s.end)).collect()
+    }
+
+    #[test]
+    fn the_media_ends_with_its_audio_or_its_video_if_that_ends_sooner() {
+        let grid = Grid::new(30);
+        assert_eq!(end_of_media(4.0, None, grid), 120);
+        assert_eq!(end_of_media(4.0, Some(3.7), grid), 111);
+        assert_eq!(end_of_media(4.0, Some(3.73), grid), 111);
+        assert_eq!(end_of_media(4.0, Some(5.0), grid), 120);
+        assert_eq!(end_of_media(4.0, Some(0.0), grid), 0);
+        // 301 frames at 30 fps last 10.0333… s, which ffprobe prints as 10.033333.
+        assert_eq!(end_of_media(11.0, Some(10.033333), grid), 301);
+    }
+
+    #[test]
+    fn the_last_cut_stops_at_the_end_of_the_video() {
+        // The speech runs on to 3.95 s of 4 s of audio, but the video ends at 3.7 s.
+        let t = transcript(
+            4.0,
+            &[(2.5, 3.98)],
+            &[
+                ("Ship", 2.6, 2.9),
+                ("it", 2.9, 3.1),
+                ("tonight.", 3.1, 3.95),
+            ],
+        );
+        assert_eq!(kept(&plan(&t)), [(71, 120)]);
+        let cuts = plan_with_video(&t, Some(3.7));
+        assert_eq!(kept(&cuts), [(71, 111)]);
+        let gaps: Vec<(i64, i64, Reason)> = cuts
+            .gaps
+            .iter()
+            .map(|g| (g.start, g.end, g.reason))
+            .collect();
+        assert_eq!(gaps, [(0, 71, Reason::Pause)]);
+    }
+
+    #[test]
+    fn a_section_that_the_end_of_the_video_leaves_too_short_is_dropped() {
+        // The video ends at 3.7 s: "Bye." keeps only 3.367 - 3.7 s, under the 0.5 s
+        // minimum, and "Thanks." comes after the end of the video.
+        let t = transcript(
+            5.0,
+            &[(1.0, 2.0), (3.5, 3.8), (4.3, 4.6)],
+            &[
+                ("Hello.", 1.0, 2.0),
+                ("Bye.", 3.5, 3.8),
+                ("Thanks.", 4.3, 4.6),
+            ],
+        );
+        assert_eq!(kept(&plan(&t)), [(26, 63), (101, 117), (125, 141)]);
+        let cuts = plan_with_video(&t, Some(3.7));
+        assert_eq!(kept(&cuts), [(26, 63)]);
+        let gaps: Vec<(i64, i64, Reason, Range<usize>)> = cuts
+            .gaps
+            .iter()
+            .map(|g| (g.start, g.end, g.reason, g.words.clone()))
+            .collect();
+        assert_eq!(
+            gaps,
+            [(0, 26, Reason::Pause, 0..0), (63, 111, Reason::Short, 1..3)]
+        );
+    }
+
+    #[test]
+    fn a_video_longer_than_its_audio_changes_nothing() {
+        let t = transcript(
+            4.0,
+            &[(1.0, 3.98)],
+            &[("Hello", 1.0, 1.5), ("there.", 1.5, 3.95)],
+        );
+        let longer = plan_with_video(&t, Some(4.5));
+        assert_eq!(kept(&longer), kept(&plan(&t)));
+        assert_eq!(longer.gaps, plan(&t).gaps);
     }
 
     #[test]

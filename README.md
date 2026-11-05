@@ -48,10 +48,10 @@ The full plan is in the [product requirements document](docs/PRD.md).
 You need a recent stable Rust toolchain from [rustup](https://rustup.rs) (the code uses
 the 2024 edition). Building also compiles whisper.cpp, so you need CMake, a C and C++
 compiler, and libclang (on Debian and Ubuntu: `cmake`, `build-essential` and
-`libclang-dev`); the first build takes a few minutes. `sabicut analyze`, `preview` and
-`render` run ffmpeg, so install that too: version 6.1 or newer with libx264, for
-example `sudo apt install ffmpeg` on Ubuntu 24.04 (see
-[docs/render.md](docs/render.md#what-you-need)).
+`libclang-dev`); the first build takes a few minutes. `sabicut analyze`, `plan`,
+`preview` and `render` run ffmpeg (`plan` asks ffprobe where each clip's video ends), so
+install that too: version 6.1 or newer with libx264, for example `sudo apt install ffmpeg`
+on Ubuntu 24.04 (see [docs/render.md](docs/render.md#what-you-need)).
 
 ```sh
 git clone https://github.com/DCT-Berinyuy/sabicut
@@ -93,7 +93,8 @@ Indexes count from 0, in file order. Usage errors exit with status 2.
 ## The edit plan
 
 A short is described by a hand-editable `plan.toml`. Schema v1 is frozen: within v1
-only optional fields may be added, and a breaking change means `schema = 2`. See
+only optional fields may be added (one rule was tightened on purpose, for captions in
+plans with several sources; see below), and a breaking change means `schema = 2`. See
 [`examples/plan.toml`](examples/plan.toml) and section 5 of the [PRD](docs/PRD.md).
 
 | Key | Required | Meaning |
@@ -266,6 +267,7 @@ one unless you pass `--force`.
 | Pauses | A pause between words longer than the threshold is cut, keeping some silence ahead of the speech and after it. Speech runs to the edges of its speech segment, up to 1 s past its words, because voice-activity detection finds where a voice starts and stops better than the word times do. A pause is only cut if that removes enough, and kept sections that are too short, such as a lone "um", are dropped | `--max-pause` (0.4 s), `--pad-before` (0.15 s), `--pad-after` (0.1 s), `--min-cut` (0.2 s), `--min-keep` (0.5 s) |
 | False starts | A phrase broken off and said again from its start ("So today we… So today we're going to talk about Rust") is cut, keeping the last take. The fragment must start a phrase, break off at a dash, an ellipsis or a pause of at least 0.2 s, not end a sentence, and repeat word for word at the start of the next phrase (its last word may be cut short, "tod-" for "today"), and the next phrase must go on further. Emphasis ("very, very good", "oh dear, oh dear,"), one-word repeats and complete sentences said twice are kept | `--false-start-words` (2), `--no-false-starts` |
 | No mid-word cuts | Every cut lands on a frame boundary of the output rate, outside every word. A false start with no pause around it has no clean place to cut, so it is kept and listed | `--fps` (30) |
+| End of the video | No cut goes past the last frame of a clip's video, which `plan` reads with ffprobe: phones often stop the video a little before the audio, and the word timings only say where the audio ends. A cut that this leaves too short is dropped like any other, and `plan` warns when speech runs on after the video ends. A file with no video (a WAV recording, say) is planned to the end of its audio | none |
 | Crop | Every clip is cropped to 9:16 around its centre | `--crop-x`: one value for all clips, or one per clip separated by commas (0.5) |
 | Zooms | A punch-in zoom starts with each keyword and holds until the next zoom or the end of the cut. Optionally it zooms back out after the keyword, and every second cut starts zoomed in to hide jump cuts | `--zoom` (1.25), `--zoom-hold` (off), `--cut-zoom` (off), `--no-zoom` |
 | Hook | The hook text over the opening seconds, shortened if the output is shorter | `--hook`, `--hook-dur` (2 s) |

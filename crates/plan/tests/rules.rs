@@ -42,7 +42,15 @@ fn source(index: usize, transcript: Transcript) -> SourceInput {
         words_path: format!("clip{index}.words.json"),
         transcript,
         crop_x: 0.5,
+        video_end: None,
     }
+}
+
+/// Where a source's media ends: with its audio, or its video if that ends sooner.
+fn end_of_media(source: &SourceInput) -> Rational {
+    let audio = source.transcript.duration();
+    let end = source.video_end.map_or(audio, |video| video.min(audio));
+    Rational::from_secs_f64(end).unwrap()
 }
 
 /// Cut points that lie inside a word (start and end included), found with exact
@@ -53,8 +61,8 @@ fn mid_word_cuts(plan: &Plan, sources: &[SourceInput]) -> Vec<String> {
     for segment in timeline.segments() {
         let source = sources.iter().find(|s| s.id == segment.source()).unwrap();
         let fps = i64::from(timeline.fps());
-        let duration = Rational::from_secs_f64(source.transcript.duration()).unwrap();
-        let end_of_media = duration.numer() * fps / duration.denom();
+        let end = end_of_media(source);
+        let end_of_media = end.numer() * fps / end.denom();
         for frame in [segment.source_in(), segment.source_out()] {
             let at = timeline.frame_time(frame);
             if frame == 0 || i64::try_from(frame).unwrap() >= end_of_media {
@@ -82,6 +90,112 @@ fn cut_times(plan: &Plan) -> Vec<(String, f64, f64)> {
         .iter()
         .map(|cut| (cut.src().to_owned(), cut.in_point(), cut.out_point()))
         .collect()
+}
+
+/// Cuts that end after the end of their source's video, found with exact rational time.
+fn cuts_past_the_video(plan: &Plan, sources: &[SourceInput]) -> Vec<String> {
+    let timeline = Timeline::from_plan(plan).unwrap();
+    timeline
+        .segments()
+        .iter()
+        .filter_map(|segment| {
+            let source = sources.iter().find(|s| s.id == segment.source()).unwrap();
+            let video_end = Rational::from_secs_f64(source.video_end?).unwrap();
+            let out = timeline.frame_time(segment.source_out());
+            (out > video_end).then(|| {
+                format!(
+                    "{} ends at {}, after its video ({})",
+                    source.id,
+                    out.to_f64(),
+                    video_end.to_f64()
+                )
+            })
+        })
+        .collect()
+}
+
+#[test]
+fn no_cut_goes_past_the_end_of_the_video() {
+    // The audio lasts 10 s, but the video ends at 9.7 s, while "now." is said.
+    let sources = [SourceInput {
+        video_end: Some(9.7),
+        ..source(
+            0,
+            clip(10.0, &[(1.0, "Stop leaking your keys."), (9.2, "Bye now.")]),
+        )
+    }];
+    let planned = plan(&sources, &Options::default()).unwrap();
+    assert_eq!(
+        cut_times(planned.plan()),
+        [("a".to_owned(), 0.833, 2.3), ("a".to_owned(), 9.033, 9.7)]
+    );
+    let report = planned.report();
+    assert_eq!(report.mid_word, 0);
+    assert_eq!(
+        mid_word_cuts(planned.plan(), &sources),
+        Vec::<String>::new()
+    );
+    let reasons: Vec<Reason> = report.removals.iter().map(|r| r.reason).collect();
+    assert_eq!(reasons, [Reason::Pause, Reason::Pause]);
+    assert_eq!(
+        report.warnings,
+        [
+            "source a: the video ends at 9.700 s, before the speech does (9.800 s), so the speech after it is cut"
+        ]
+    );
+
+    // Ending at 9.4 s, the video leaves too little of "Bye now." to keep.
+    let sources = [SourceInput {
+        video_end: Some(9.4),
+        ..sources[0].clone()
+    }];
+    let planned = plan(&sources, &Options::default()).unwrap();
+    assert_eq!(cut_times(planned.plan()), [("a".to_owned(), 0.833, 2.3)]);
+    let last = planned.report().removals.last().unwrap();
+    assert_eq!(
+        (last.reason, last.text.as_str()),
+        (Reason::Short, "Bye now.")
+    );
+    assert!((last.start - 2.3).abs() < 1e-9 && (last.end - 9.4).abs() < 1e-9);
+    assert!(
+        planned
+            .toml()
+            .contains("# removed a 2.300 - 9.400 (7.100 s): too short \"Bye now.\"")
+    );
+    assert_eq!(planned.report().warnings.len(), 1);
+
+    // A video that ends after the audio changes nothing, and gets no warning.
+    let longer = [SourceInput {
+        video_end: Some(10.5),
+        ..sources[0].clone()
+    }];
+    let without = [SourceInput {
+        video_end: None,
+        ..sources[0].clone()
+    }];
+    let planned = plan(&longer, &Options::default()).unwrap();
+    assert_eq!(
+        planned.toml(),
+        plan(&without, &Options::default()).unwrap().toml()
+    );
+    assert!(planned.report().warnings.is_empty());
+}
+
+#[test]
+fn a_video_end_must_be_a_time() {
+    for bad in [f64::NAN, -1.0, f64::INFINITY] {
+        let sources = [SourceInput {
+            video_end: Some(bad),
+            ..source(0, clip(3.0, &[(1.0, "Hello.")]))
+        }];
+        let error = plan(&sources, &Options::default()).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("video_end must be a time of 0 s or more"),
+            "{error}"
+        );
+    }
 }
 
 #[test]
@@ -455,11 +569,23 @@ fn merge_overlaps(segments: Vec<SpeechSegment>, duration: f64) -> Vec<SpeechSegm
 #[test]
 fn no_cut_lands_inside_a_word_on_any_clip_or_frame_rate() {
     let mut random = Random(0x5AB1_C07F);
+    // Video ends come from a generator of their own, so the clips stay the same.
+    let mut ends = Random(0xE17D_0F71);
     let mut plans = 0;
     for round in 0..300 {
         let fps = [24, 25, 30, 60, 23, 7, 1][round % 7];
         let clips: Vec<SourceInput> = (0..(1 + round % 3))
-            .map(|i| source(i, random_clip(&mut random)))
+            .map(|i| {
+                let clip = source(i, random_clip(&mut random));
+                // Half the videos end up to 1 s before their audio, some a little after.
+                let audio = clip.transcript.duration();
+                let video_end = match ends.next() % 4 {
+                    0 | 1 => Some((audio - ends.seconds(0.0, 1.0)).max(0.0)),
+                    2 => Some(audio + ends.seconds(0.0, 0.5)),
+                    _ => None,
+                };
+                SourceInput { video_end, ..clip }
+            })
             .collect();
         let options = Options {
             fps,
@@ -491,6 +617,12 @@ fn no_cut_lands_inside_a_word_on_any_clip_or_frame_rate() {
             planned.toml()
         );
         assert_eq!(planned.report().mid_word, 0, "round {round}");
+        assert_eq!(
+            cuts_past_the_video(planned.plan(), &clips),
+            Vec::<String>::new(),
+            "round {round} at {fps} fps:\n{}",
+            planned.toml()
+        );
         // The written text is the plan.
         assert_eq!(
             &Plan::from_toml_str(planned.toml()).unwrap(),

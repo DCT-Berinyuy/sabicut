@@ -5,7 +5,7 @@
 >
 > *Sabi* is Pidgin for "to know / know-how".
 
-Owner: Mr. DCT (DevSafe) · **Status: ACTIVE (time-boxed)** · Updated: 2026-11-02
+Owner: Mr. DCT (DevSafe) · **Status: ACTIVE (time-boxed)** · Updated: 2026-11-05
 
 ---
 
@@ -92,7 +92,7 @@ stroke = 10
 
 **Schema rules**
 - `schema` is an integer. A JSON Schema is generated from the Rust types (`schemars`) and committed as `schema/v1.json`.
-- Within v1, only **additive, optional** fields may be added. A breaking change means `schema = 2` plus `sabicut migrate`, and v1 must stay readable.
+- Within v1, only **additive, optional** fields may be added. A breaking change means `schema = 2` plus `sabicut migrate`, and v1 must stay readable. **One deliberate exception (2026-11-04):** when `[captions]` is present and the plan has two or more sources, each source used by a cut must set its own `words`, and `captions.words` is never a fallback; this tightens v1 validation instead of adding a field.
 - Output timing is **derived** from the cuts, never stored. Each cut is trimmed to an exact frame count. Mapping source time to output time clamps to the nearest cut and **never panics**.
 - Validation errors name the field and the cut index (e.g. `cut[3].out must be > in`).
 
