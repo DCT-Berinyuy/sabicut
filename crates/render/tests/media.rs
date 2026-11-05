@@ -607,13 +607,16 @@ fn captions_and_hook_are_drawn_as_in_the_preview_with_subtitles() {
     let hook_crop = format!("{}:{}:{}:{}", hook.width, hook.height, hook.x, hook.y);
     let plain = Project::open(tools(), &plan, &dir).unwrap();
     let project = plain.clone().with_graphics(Some(graphics.clone()));
+    // The subtitles may go anywhere: here in a new folder in the system temp folder,
+    // which is often on another file system (RAM) than the video.
+    let elsewhere = std::env::temp_dir().join(format!("sabicut-media-{}", std::process::id()));
     let options = RenderOptions {
         output: dir.join("out.mp4"),
         cover: Some(dir.join("cover.jpg")),
         cover_at: Some(3.5),
         preset: Preset::Ultrafast,
         overlays: Vec::new(),
-        subtitles: Some(dir.join("out.srt")),
+        subtitles: Some(elsewhere.join("subtitles/out.srt")),
     };
     let report = render(tools(), &project, &options, &mut |_| {}).unwrap();
     let output = dir.join("out.mp4");
@@ -621,10 +624,12 @@ fn captions_and_hook_are_drawn_as_in_the_preview_with_subtitles() {
     assert_output_properties(&output, &timeline);
     let (srt, cues) = report.subtitles.clone().unwrap();
     assert_eq!(cues, 2);
+    assert_eq!(srt, elsewhere.join("subtitles/out.srt"));
     assert_eq!(
         std::fs::read_to_string(&srt).unwrap(),
         graphics.subtitles().unwrap()
     );
+    let _ = std::fs::remove_dir_all(&elsewhere);
 
     // "Supabase" (output frames 24 to 48) is active at 1.3 s: gold in the band.
     assert!(gold_pixels(&region_rgb(&output, 39, &band_crop)) > 2000);

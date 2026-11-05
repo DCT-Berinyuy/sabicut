@@ -164,8 +164,9 @@ pub struct RenderOptions {
     /// Pictures drawn over the video, in order, on top of the project's captions and
     /// hook.
     pub overlays: Vec<Overlay>,
-    /// The subtitles (SRT) to write. They are written only when the project's graphics
-    /// have word timings for every source the cuts use.
+    /// The subtitles (SRT) to write, anywhere. They are written only when the project's
+    /// graphics have word timings for every source the cuts use, after the video is in
+    /// place.
     pub subtitles: Option<PathBuf>,
 }
 
@@ -226,7 +227,10 @@ pub fn render(
     for path in outputs {
         refuse_to_overwrite_a_source(project, path)?;
     }
-    // Check the cover time before the long part.
+    // Check the subtitles can be written, and the cover time, before the long part.
+    if let Some(path) = &options.subtitles {
+        check_writable(path)?;
+    }
     let cover_frame = match &options.cover {
         Some(_) => {
             let duration = project.timeline().duration().to_f64();
@@ -296,8 +300,9 @@ pub fn render(
         }
         _ => None,
     };
-    let subtitles = write_subtitles(project, options, &work)?;
     fs::rename(&encoded, &options.output).map_err(RenderError::io(&options.output))?;
+    // After the video is in place, so a problem with the subtitles never costs it.
+    let subtitles = write_subtitles(project, options)?;
     Ok(RenderReport {
         output: options.output.clone(),
         frames,
@@ -308,13 +313,12 @@ pub fn render(
     })
 }
 
-/// Writes the subtitles next to the video, if asked and the project has word timings:
-/// first in the scratch directory, then moved into place, so a failure never leaves
-/// half a file.
+/// Writes the subtitles, if asked and the project has word timings: to a temporary file
+/// next to them, then renamed over them, so a failure never leaves half a file and the
+/// rename never crosses file systems.
 fn write_subtitles(
     project: &Project,
     options: &RenderOptions,
-    work: &WorkDir,
 ) -> Result<Option<(PathBuf, usize)>, RenderError> {
     let (Some(path), Some(graphics)) = (&options.subtitles, project.graphics()) else {
         return Ok(None);
@@ -322,13 +326,35 @@ fn write_subtitles(
     let Some(cues) = graphics.cues() else {
         return Ok(None);
     };
-    let fps = project.timeline().fps();
-    let scratch = work.write("subtitles.srt", &sabicut_overlay::srt::to_srt(&cues, fps))?;
+    let text = sabicut_overlay::srt::to_srt(&cues, project.timeline().fps());
+    let temporary = temporary_path(path);
+    let written = fs::write(&temporary, text).and_then(|()| fs::rename(&temporary, path));
+    if let Err(error) = written {
+        // It may not exist; either way the write failed.
+        let _ = fs::remove_file(&temporary);
+        return Err(RenderError::io(path)(error));
+    }
+    Ok(Some((path.clone(), cues.len())))
+}
+
+/// Creates the folder `path` goes in and checks a file can be written there, by
+/// creating and removing the temporary file the real write uses.
+fn check_writable(path: &Path) -> Result<(), RenderError> {
     if let Some(dir) = path.parent().filter(|dir| !dir.as_os_str().is_empty()) {
         fs::create_dir_all(dir).map_err(RenderError::io(dir))?;
     }
-    fs::rename(&scratch, path).map_err(RenderError::io(path))?;
-    Ok(Some((path.clone(), cues.len())))
+    let temporary = temporary_path(path);
+    File::create(&temporary).map_err(RenderError::io(path))?;
+    // It was just created; if it cannot be removed, the real write will say why.
+    let _ = fs::remove_file(&temporary);
+    Ok(())
+}
+
+/// A temporary file next to `path`: its name with `.tmp-<process id>` added.
+fn temporary_path(path: &Path) -> PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push(format!(".tmp-{}", std::process::id()));
+    PathBuf::from(name)
 }
 
 /// The hook to draw on a cover taken after the hook has gone: its still picture, in a
@@ -962,6 +988,20 @@ mod tests {
         }
         assert_eq!(Preset::default(), Preset::Medium);
         assert!("fastest".parse::<Preset>().is_err());
+    }
+
+    #[test]
+    fn subtitles_are_written_through_a_file_next_to_them() {
+        let dir = std::env::temp_dir().join(format!("sabicut-srt-{}", std::process::id()));
+        let path = dir.join("new/folder/short.srt");
+        check_writable(&path).unwrap();
+        assert!(path.parent().unwrap().is_dir());
+        assert!(!temporary_path(&path).exists());
+        assert_eq!(
+            temporary_path(&path),
+            dir.join(format!("new/folder/short.srt.tmp-{}", std::process::id()))
+        );
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
