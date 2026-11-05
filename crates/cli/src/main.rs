@@ -1,12 +1,13 @@
 //! `sabicut`: validate edit plans and inspect the output timeline they produce,
 //! transcribe speech to word timings, apply transcript fixes, write plans from the word
-//! timings, and preview and render plans.
+//! timings, preview and render plans with captions, and write subtitles.
 
 mod analyze;
 mod files;
 mod fix;
 mod plan;
 mod render;
+mod srt;
 
 use std::fmt::Display;
 use std::fs::File;
@@ -25,8 +26,8 @@ const MAX_PLAN_BYTES: usize = 16 * 1024 * 1024;
 /// This version works with edit plans (plan.toml): it validates them, prints their
 /// JSON Schema, and prints the output timeline they produce. It also transcribes
 /// speech to word timings (words.json), applies transcript fixes (fixes.toml), writes
-/// plans from the word timings, writes preview stills, and renders plans to a vertical
-/// MP4 with ffmpeg (captions come later).
+/// plans from the word timings, writes preview stills, renders plans to a captioned
+/// vertical MP4 with ffmpeg, and writes subtitles (SRT).
 #[derive(Debug, Parser)]
 #[command(name = "sabicut", version)]
 struct Cli {
@@ -61,8 +62,10 @@ enum Command {
     Plan(Box<plan::PlanArgs>),
     /// Write PNG stills at chosen output times, and a contact sheet of them
     Preview(render::PreviewArgs),
-    /// Render a plan to a vertical MP4 and a cover JPG with ffmpeg
+    /// Render a plan to a vertical MP4, a cover JPG and subtitles (SRT) with ffmpeg
     Render(render::RenderArgs),
+    /// Write a plan's subtitles (SRT) without rendering
+    Srt(srt::SrtArgs),
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -100,6 +103,10 @@ enum CliError {
     Fix(#[from] fix::Error),
     #[error(transparent)]
     Plan(#[from] plan::Error),
+    #[error(transparent)]
+    Overlay(#[from] sabicut_overlay::OverlayError),
+    #[error(transparent)]
+    Srt(#[from] srt::Error),
 }
 
 fn main() -> ExitCode {
@@ -148,6 +155,7 @@ fn run(command: &Command) -> Result<(), CliError> {
         Command::Plan(args) => plan::run(args, &mut out)?,
         Command::Preview(args) => render::preview(args, &mut out)?,
         Command::Render(args) => render::render(args, &mut out)?,
+        Command::Srt(args) => srt::run(args, &mut out)?,
     }
     out.flush()?;
     Ok(())

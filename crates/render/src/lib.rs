@@ -1,7 +1,10 @@
 //! Sabicut's renderer: turns a plan and its [`Timeline`](sabicut_core::Timeline) into
-//! ffmpeg runs. It writes the final vertical MP4 and cover ([`render`], PRD F5), and
-//! PNG stills with a contact sheet ([`preview`], PRD F4). ffmpeg runs as a subprocess
-//! (PRD §8): find it with [`Ffmpeg::from_env`].
+//! ffmpeg runs. It writes the final vertical MP4, cover and subtitles ([`render`], PRD
+//! F5), and PNG stills with a contact sheet ([`preview`], PRD F4). Captions and the
+//! hook (PRD F6) are drawn by `sabicut-overlay` and placed over the video by both:
+//! give the project its [`Graphics`](sabicut_overlay::Graphics) with
+//! [`Project::with_graphics`]. ffmpeg runs as a subprocess (PRD §8): find it with
+//! [`Ffmpeg::from_env`].
 //!
 //! ```no_run
 //! use std::path::Path;
@@ -17,6 +20,7 @@
 //!     cover_at: None,
 //!     preset: Preset::Medium,
 //!     overlays: Vec::new(),
+//!     subtitles: None,
 //! };
 //! let report = render(&tools, &project, &options, &mut |_progress| {})?;
 //! println!("{} frames at {:.1} LUFS", report.frames, report.loudness.integrated);
@@ -46,7 +50,7 @@ pub mod zoom;
 
 pub use error::RenderError;
 pub use geometry::{CropRect, crop_window};
-pub use graph::{FADE_SAMPLES, Overlay, OverlaySource, SAMPLE_RATE, sample_at};
+pub use graph::{CaptionBand, FADE_SAMPLES, Overlay, OverlaySource, SAMPLE_RATE, sample_at};
 pub use loudness::{Loudness, TARGET_LUFS, TARGET_RANGE, TARGET_TRUE_PEAK};
 pub use preview::{
     CONTACT_SHEET_NAME, PreviewOptions, PreviewReport, SHEET_CELL_WIDTH, SHEET_COLUMNS, Still,

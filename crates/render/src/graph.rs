@@ -81,6 +81,60 @@ impl Inputs {
         self.add(file_url(path))
     }
 
+    /// Adds a local file of raw RGBA pictures (straight alpha), `width` × `height`, at
+    /// `fps`. Returns its input index.
+    pub(crate) fn add_rgba_file(
+        &mut self,
+        path: &Path,
+        width: u32,
+        height: u32,
+        fps: u32,
+    ) -> usize {
+        self.args
+            .extend(["-protocol_whitelist".into(), "file".into()]);
+        self.rgba_format(width, height, fps);
+        self.add(file_url(path))
+    }
+
+    /// Adds the caption band, raw RGBA pictures that `render` writes to the encoder's
+    /// [`BAND_PIPE`]. Returns its input index.
+    pub(crate) fn add_band_pipe(&mut self, band: CaptionBand, fps: u32) -> usize {
+        self.args
+            .extend(["-protocol_whitelist".into(), "pipe".into()]);
+        self.rgba_format(band.width, band.height, fps);
+        // A few band pictures (0.7 MB each on a 1080×1920 short) may wait between the
+        // pipe and overlay.
+        self.args
+            .extend(["-thread_queue_size".into(), BAND_QUEUE.to_string().into()]);
+        self.add(BAND_PIPE.into())
+    }
+
+    /// Adds the input an overlay is drawn from. Returns its input index.
+    pub(crate) fn add_overlay(&mut self, overlay: &Overlay, fps: u32) -> usize {
+        match &overlay.source {
+            OverlaySource::File(path) => self.add_file(path),
+            OverlaySource::Rgba {
+                path,
+                width,
+                height,
+            } => self.add_rgba_file(path, *width, *height, fps),
+            OverlaySource::CaptionBand(band) => self.add_band_pipe(*band, fps),
+        }
+    }
+
+    fn rgba_format(&mut self, width: u32, height: u32, fps: u32) {
+        self.args.extend([
+            "-f".into(),
+            "rawvideo".into(),
+            "-pix_fmt".into(),
+            "rgba".into(),
+            "-s".into(),
+            format!("{width}x{height}").into(),
+            "-framerate".into(),
+            fps.to_string().into(),
+        ]);
+    }
+
     fn add(&mut self, url: OsString) -> usize {
         self.args.extend(["-i".into(), url]);
         self.count += 1;
@@ -307,6 +361,8 @@ pub(crate) const VIDEO_FILTERS: &[&str] = &[
 ];
 /// Filters needed to zoom.
 pub(crate) const ZOOM_FILTERS: &[&str] = &["zoompan"];
+/// Filters needed to draw overlays, captions and the hook.
+pub(crate) const OVERLAY_FILTERS: &[&str] = &["overlay", "scale", "format"];
 /// Filters needed to tone-map HDR sources.
 pub(crate) const HDR_FILTERS: &[&str] = &["zscale", "tonemap"];
 /// Filters needed for the audio.
@@ -406,10 +462,10 @@ pub(crate) fn seek_before(frame: u64, fps: u32) -> f64 {
     (time - PREROLL_SECONDS).max(0.0)
 }
 
-/// A picture drawn over the joined cuts, before encoding: the extension point for
-/// captions, the hook and the end card (F6). PRD §8 keeps this cheap: captions are a
-/// caption band (about 1080×400 RGBA) placed with `overlay=x:y`, and other graphics are
-/// only drawn inside their time window.
+/// A picture drawn over the joined cuts, before encoding: how the captions and the hook
+/// (PRD F6) are placed, and the way to add other graphics. PRD §8 keeps this cheap:
+/// captions are a caption band (756×240 RGBA on a 1080×1920 short) placed with
+/// `overlay=x:y`, and other graphics are only drawn inside their time window.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Overlay {
     /// Where the overlay's frames come from.
@@ -429,20 +485,86 @@ pub enum OverlaySource {
     /// as long as the overlay is drawn; a video is drawn frame by frame from output
     /// frame 0 and its last frame is held when it ends.
     File(PathBuf),
+    /// A local file of raw RGBA pictures, 8 bits a channel with straight (not
+    /// premultiplied) alpha, `width` × `height`, one per output frame from frame 0. The
+    /// last picture is held when the file ends.
+    Rgba {
+        /// The file.
+        path: PathBuf,
+        /// Picture width in pixels.
+        width: u32,
+        /// Picture height in pixels.
+        height: u32,
+    },
+    /// The caption band: raw RGBA pictures that `render` draws from the project's
+    /// captions for every output frame and pipes to ffmpeg while it encodes. Only
+    /// `render` makes these.
+    CaptionBand(CaptionBand),
 }
 
-/// Appends `overlays` over the video labelled `base` and returns the final label.
-/// `first_input` is the input index of the first overlay's source.
+impl OverlaySource {
+    /// Whether the pictures are raw RGBA, which are converted to the video's colours
+    /// before they are drawn.
+    fn is_rgba(&self) -> bool {
+        matches!(self, Self::Rgba { .. } | Self::CaptionBand(_))
+    }
+}
+
+/// The size of the caption band piped to ffmpeg ([`OverlaySource::CaptionBand`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CaptionBand {
+    width: u32,
+    height: u32,
+}
+
+impl CaptionBand {
+    pub(crate) fn new(width: u32, height: u32) -> Self {
+        Self { width, height }
+    }
+
+    /// Width in pixels.
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    /// Height in pixels.
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+}
+
+/// Where the encoder reads the caption band: its standard output, which `render`
+/// connects to the reading end of a pipe (ffmpeg writes nothing there, since the video
+/// goes to a file). Standard input already carries the video, and this needs no named
+/// pipe or extra file descriptor, so it works the same everywhere.
+pub(crate) const BAND_PIPE: &str = "pipe:1";
+/// Caption band pictures that may wait in ffmpeg between the pipe and `overlay`, like
+/// the video's queue of 4 frames.
+const BAND_QUEUE: u32 = 4;
+
+/// Converts raw RGBA pictures to the video's colours before `overlay` draws them:
+/// BT.709, limited range, 4:2:0 with alpha. Done explicitly so every ffmpeg version
+/// converts the same way (left to itself, ffmpeg 6.1 converts with BT.601).
+pub(crate) const RGBA_TO_VIDEO: &str = "scale=out_color_matrix=bt709:out_range=tv,format=yuva420p";
+
+/// Appends `overlays` over the video labelled `base` and returns the final label. Each
+/// overlay comes with the input index of its pictures; `prefix` keeps the labels of
+/// several chains in one graph apart.
 pub(crate) fn overlay_chain(
     graph: &mut Graph,
     base: &str,
-    overlays: &[Overlay],
-    first_input: usize,
+    overlays: &[(usize, &Overlay)],
+    prefix: &str,
 ) -> String {
     let mut current = base.to_owned();
-    for (k, overlay) in overlays.iter().enumerate() {
-        let input = format!("{}:v:0", first_input + k);
-        let next = format!("ov{k}");
+    for (k, (input, overlay)) in overlays.iter().enumerate() {
+        let mut picture = format!("{input}:v:0");
+        if overlay.source.is_rgba() {
+            let converted = format!("{prefix}rgba{k}");
+            graph.chain(&[&picture], RGBA_TO_VIDEO, &[&converted]);
+            picture = converted;
+        }
+        let next = format!("{prefix}ov{k}");
         let enable = overlay.frames.as_ref().map_or_else(String::new, |frames| {
             format!(
                 ":enable='between(n,{},{})'",
@@ -451,7 +573,7 @@ pub(crate) fn overlay_chain(
             )
         });
         graph.chain(
-            &[&current, &input],
+            &[&current, &picture],
             &format!(
                 "overlay=x={}:y={}:eof_action=repeat{enable}",
                 overlay.x, overlay.y
@@ -662,18 +784,68 @@ mod tests {
                 frames: None,
             },
             Overlay {
-                source: OverlaySource::File("hook.png".into()),
-                x: 40,
-                y: 200,
+                source: OverlaySource::Rgba {
+                    path: "hook.rgba".into(),
+                    width: 756,
+                    height: 300,
+                },
+                x: 162,
+                y: 262,
                 frames: Some(0..60),
             },
+            Overlay {
+                source: OverlaySource::CaptionBand(CaptionBand::new(756, 240)),
+                x: 162,
+                y: 1128,
+                frames: None,
+            },
         ];
-        let label = overlay_chain(&mut graph, "vcat", &overlays, 3);
-        assert_eq!(label, "ov1");
+        let indexed: Vec<(usize, &Overlay)> =
+            overlays.iter().zip(3..).map(|(o, i)| (i, o)).collect();
+        let label = overlay_chain(&mut graph, "vcat", &indexed, "e");
+        assert_eq!(label, "eov2");
         assert_eq!(
             graph.finish(),
-            "[vcat][3:v:0]overlay=x=0:y=1300:eof_action=repeat[ov0];\n\
-             [ov0][4:v:0]overlay=x=40:y=200:eof_action=repeat:enable='between(n,0,59)'[ov1]\n"
+            "[vcat][3:v:0]overlay=x=0:y=1300:eof_action=repeat[eov0];\n\
+             [4:v:0]scale=out_color_matrix=bt709:out_range=tv,format=yuva420p[ergba1];\n\
+             [eov0][ergba1]overlay=x=162:y=262:eof_action=repeat:enable='between(n,0,59)'[eov1];\n\
+             [5:v:0]scale=out_color_matrix=bt709:out_range=tv,format=yuva420p[ergba2];\n\
+             [eov1][ergba2]overlay=x=162:y=1128:eof_action=repeat[eov2]\n"
+        );
+    }
+
+    #[test]
+    fn rgba_inputs_are_raw_video() {
+        let mut inputs = Inputs::default();
+        inputs.add_file(Path::new("/w/audio.wav"));
+        let hook = Overlay {
+            source: OverlaySource::Rgba {
+                path: "/w/hook.rgba".into(),
+                width: 756,
+                height: 300,
+            },
+            x: 162,
+            y: 262,
+            frames: Some(0..60),
+        };
+        let band = Overlay {
+            source: OverlaySource::CaptionBand(CaptionBand::new(756, 240)),
+            x: 162,
+            y: 1128,
+            frames: None,
+        };
+        assert_eq!(inputs.add_overlay(&hook, 30), 1);
+        assert_eq!(inputs.add_overlay(&band, 30), 2);
+        let args: Vec<String> = inputs
+            .args()
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            args.join(" "),
+            "-protocol_whitelist file -i file:/w/audio.wav \
+             -protocol_whitelist file -f rawvideo -pix_fmt rgba -s 756x300 -framerate 30 -i file:/w/hook.rgba \
+             -protocol_whitelist pipe -f rawvideo -pix_fmt rgba -s 756x240 -framerate 30 -thread_queue_size 4 -i pipe:1"
         );
     }
 }

@@ -20,6 +20,7 @@ sabicut-core.workspace = true
 sabicut-analyze.workspace = true
 sabicut-plan.workspace = true
 sabicut-render.workspace = true
+sabicut-overlay.workspace = true
 clap.workspace = true
 thiserror.workspace = true
 

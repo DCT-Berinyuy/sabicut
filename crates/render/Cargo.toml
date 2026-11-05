@@ -13,6 +13,7 @@ categories.workspace = true
 
 [dependencies]
 sabicut-core.workspace = true
+sabicut-overlay.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

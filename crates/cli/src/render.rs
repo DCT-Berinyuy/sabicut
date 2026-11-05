@@ -1,10 +1,12 @@
-//! `sabicut render` and `sabicut preview`.
+//! `sabicut render` and `sabicut preview`, with captions and the hook when the plan has
+//! them.
 
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
 use clap::Args;
-use sabicut_core::Plan;
+use sabicut_core::{Plan, Timeline};
+use sabicut_overlay::Graphics;
 use sabicut_render::{
     Ffmpeg, OpenError, Preset, PreviewOptions, ProbedSource, Progress, Project, RenderOptions,
 };
@@ -50,9 +52,9 @@ pub(crate) struct PreviewArgs {
 }
 
 pub(crate) fn render(args: &RenderArgs, out: &mut impl Write) -> Result<(), CliError> {
-    let (plan, _) = load_plan(&args.plan)?;
+    let (plan, timeline) = load_plan(&args.plan)?;
     let tools = Ffmpeg::from_env()?;
-    let project = open(&tools, &plan, &args.plan)?;
+    let project = open(&tools, &plan, &timeline, &args.plan)?;
     let output = args
         .output
         .clone()
@@ -64,12 +66,19 @@ pub(crate) fn render(args: &RenderArgs, out: &mut impl Write) -> Result<(), CliE
     });
     let mut log = io::stderr().lock();
     describe_sources(&mut log, &project)?;
+    describe_graphics(&mut log, &project)?;
+    // Subtitles go next to the video when every source has word timings.
+    let subtitles = project
+        .graphics()
+        .and_then(Graphics::words)
+        .map(|_| output.with_extension("srt"));
     let options = RenderOptions {
         output,
         cover,
         cover_at: args.cover_at,
         preset: args.preset,
         overlays: Vec::new(),
+        subtitles,
     };
     let mut reporter = Reporter::new(log);
     let report = sabicut_render::render(&tools, &project, &options, &mut |progress| {
@@ -100,14 +109,22 @@ pub(crate) fn render(args: &RenderArgs, out: &mut impl Write) -> Result<(), CliE
             timeline.frame_time(*frame).to_f64(),
         )?;
     }
-    note_overlays(out, &plan)?;
+    if let Some((path, cues)) = &report.subtitles {
+        writeln!(
+            out,
+            "ok: wrote {} (subtitles: {})",
+            path.display(),
+            count(*cues, "cue")
+        )?;
+    }
+    note_missing_glyphs(out, &project)?;
     Ok(())
 }
 
 pub(crate) fn preview(args: &PreviewArgs, out: &mut impl Write) -> Result<(), CliError> {
-    let (plan, _) = load_plan(&args.plan)?;
+    let (plan, timeline) = load_plan(&args.plan)?;
     let tools = Ffmpeg::from_env()?;
-    let project = open(&tools, &plan, &args.plan)?;
+    let project = open(&tools, &plan, &timeline, &args.plan)?;
     let out_dir = args.out_dir.clone().unwrap_or_else(|| {
         let stem = args.plan.file_stem().unwrap_or_default().to_string_lossy();
         plan_dir(&args.plan).join(format!("{stem}-preview"))
@@ -134,26 +151,36 @@ pub(crate) fn preview(args: &PreviewArgs, out: &mut impl Write) -> Result<(), Cl
         report.contact_sheet.display(),
         count(report.stills.len(), "still"),
     )?;
-    note_overlays(out, &plan)?;
+    note_missing_glyphs(out, &project)?;
     Ok(())
 }
 
 /// The directory relative plan paths are resolved from.
-fn plan_dir(plan: &Path) -> PathBuf {
+pub(crate) fn plan_dir(plan: &Path) -> PathBuf {
     match plan.parent() {
         Some(dir) if !dir.as_os_str().is_empty() => dir.to_owned(),
         _ => PathBuf::from("."),
     }
 }
 
-fn open(tools: &Ffmpeg, plan: &Plan, path: &Path) -> Result<Project, CliError> {
-    Project::open(tools, plan, &plan_dir(path)).map_err(|error| match error {
+/// Reads the plan's words, fixes and font (first, so a mistake there shows before the
+/// sources are probed) and probes its sources.
+fn open(
+    tools: &Ffmpeg,
+    plan: &Plan,
+    timeline: &Timeline,
+    path: &Path,
+) -> Result<Project, CliError> {
+    let dir = plan_dir(path);
+    let graphics = Graphics::load(plan, timeline, &dir)?;
+    let project = Project::open(tools, plan, &dir).map_err(|error| match error {
         OpenError::Invalid(errors) => CliError::Invalid {
             path: path.to_owned(),
             errors,
         },
         OpenError::Render(error) => CliError::Render(error),
-    })
+    })?;
+    Ok(project.with_graphics(graphics))
 }
 
 fn describe_sources(log: &mut impl Write, project: &Project) -> io::Result<()> {
@@ -200,20 +227,52 @@ fn describe(source: &ProbedSource) -> String {
     )
 }
 
-/// Tells the user that hook and caption settings are not drawn yet.
-fn note_overlays(out: &mut impl Write, plan: &Plan) -> io::Result<()> {
-    let mut skipped = Vec::new();
-    if plan.hook().is_some() {
-        skipped.push("[hook]");
+/// Says where the captions and hook go.
+fn describe_graphics(log: &mut impl Write, project: &Project) -> io::Result<()> {
+    let Some(graphics) = project.graphics() else {
+        return Ok(());
+    };
+    if let Some(band) = graphics.band() {
+        writeln!(
+            log,
+            "captions: {} in a {}x{} band at x {}, y {}, in {}",
+            count(graphics.page_count(), "page"),
+            band.width,
+            band.height,
+            band.x,
+            band.y,
+            graphics.font_name(),
+        )?;
     }
-    if plan.captions().is_some() {
-        skipped.push("[captions]");
+    if let Some(hook) = graphics.hook() {
+        let placement = hook.placement;
+        writeln!(
+            log,
+            "hook: frames {}..{} in a {}x{} box at x {}, y {}",
+            hook.frames.start,
+            hook.frames.end,
+            placement.width,
+            placement.height,
+            placement.x,
+            placement.y,
+        )?;
     }
-    if !skipped.is_empty() {
+    Ok(())
+}
+
+/// Warns about characters the caption font cannot draw.
+fn note_missing_glyphs(out: &mut impl Write, project: &Project) -> io::Result<()> {
+    let Some(graphics) = project.graphics() else {
+        return Ok(());
+    };
+    let missing = graphics.missing_glyphs();
+    if !missing.is_empty() {
+        let list: Vec<String> = missing.iter().map(|c| format!("{c:?}")).collect();
         writeln!(
             out,
-            "note: {} not drawn yet; captions and the hook come in a later version",
-            skipped.join(" and "),
+            "note: {} has no glyph for {}; drawn as empty boxes",
+            graphics.font_name(),
+            list.join(", ")
         )?;
     }
     Ok(())

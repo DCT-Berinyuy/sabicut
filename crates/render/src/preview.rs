@@ -3,17 +3,22 @@
 //!
 //! Each still opens its source just before the frame it needs, decodes up to it and
 //! runs the same filters as the render ([`crate::graph::video_chain`]) on that one
-//! frame, so a still matches the rendered frame at the same time. Stills are made up to
-//! four per ffmpeg run (each still has its own decoder, so this bounds memory), and the
-//! contact sheet is laid out from the written PNGs.
+//! frame, so a still matches the rendered frame at the same time. Captions and the hook
+//! come from the same painter as in the render, as raw RGBA pictures for that frame,
+//! and go through the same `overlay` chain. The safe-zone guide is drawn on top. Stills
+//! are made up to four per ffmpeg run (each still has its own decoder, so this bounds
+//! memory), and the contact sheet is laid out from the written PNGs.
 
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use sabicut_overlay::{Graphics, Painter};
+
 use crate::error::RenderError;
 use crate::graph::{
-    Graph, HDR_FILTERS, Inputs, VIDEO_FILTERS, ZOOM_FILTERS, seek_before, video_chain,
+    Graph, HDR_FILTERS, Inputs, OVERLAY_FILTERS, Overlay, OverlaySource, VIDEO_FILTERS,
+    ZOOM_FILTERS, overlay_chain, seek_before, video_chain,
 };
 use crate::project::Project;
 use crate::render::{SOURCE_TIMESTAMPS, base_args};
@@ -92,6 +97,9 @@ pub fn preview(
     if options.safe_zones {
         tools.require_filters(&["drawbox"], "draw the safe-zone guide")?;
     }
+    if project.draws_graphics() {
+        tools.require_filters(OVERLAY_FILTERS, "draw captions and the hook")?;
+    }
     tools.require_encoder("png", "write PNG stills")?;
     let frames = options
         .times
@@ -138,7 +146,8 @@ fn write_stills(
     let mut inputs = Inputs::default();
     let mut graph = Graph::default();
     let mut outputs = Vec::with_capacity(stills.len());
-    for still in stills {
+    let mut painter = project.graphics().map(Graphics::painter);
+    for (k, still) in stills.iter().enumerate() {
         let (cut, local) =
             project
                 .locate(still.frame)
@@ -149,13 +158,31 @@ fn write_stills(
                 })?;
         let seek = seek_before(cut.segment.source_in().saturating_add(local), fps);
         let input = inputs.add_seeked(&cut.path, seek, cut.spec.decoder_threads());
-        let mut chain = video_chain(&cut.spec, &cut.curve, &cut.segment, local..local + 1);
-        if options.safe_zones {
-            chain.push(',');
-            chain.push_str(&guide_filters(out_w, out_h));
-        }
-        let label = format!("s{input}");
-        graph.chain(&[&format!("{input}:V:0")], &chain, &[&label]);
+        let video = format!("v{k}");
+        graph.chain(
+            &[&format!("{input}:V:0")],
+            &video_chain(&cut.spec, &cut.curve, &cut.segment, local..local + 1),
+            &[&video],
+        );
+        let drawn = match (painter.as_mut(), project.graphics()) {
+            (Some(painter), Some(graphics)) => {
+                let name = format!("still-{batch}-{k}");
+                still_overlays(painter, graphics, work, &name, still.frame)?
+            }
+            _ => Vec::new(),
+        };
+        let indexed: Vec<(usize, &Overlay)> = drawn
+            .iter()
+            .map(|overlay| (inputs.add_overlay(overlay, fps), overlay))
+            .collect();
+        let top = overlay_chain(&mut graph, &video, &indexed, &format!("p{k}"));
+        let finish = if options.safe_zones {
+            guide_filters(out_w, out_h)
+        } else {
+            "null".to_owned()
+        };
+        let label = format!("s{k}");
+        graph.chain(&[&top], &finish, &[&label]);
         outputs.push((label, &still.path));
     }
     let script = work.write(&format!("stills-{batch}.graph"), &graph.finish())?;
@@ -170,6 +197,45 @@ fn write_stills(
     }
     tools.run_ffmpeg(&args)?;
     Ok(())
+}
+
+/// The hook and caption band on output frame `frame` as overlays, from the pictures
+/// the render pipes, written to scratch files named after `name`.
+fn still_overlays(
+    painter: &mut Painter<'_>,
+    graphics: &Graphics,
+    work: &WorkDir,
+    name: &str,
+    frame: u64,
+) -> Result<Vec<Overlay>, RenderError> {
+    let mut overlays = Vec::new();
+    if let Some(hook) = graphics.hook().filter(|hook| hook.frames.contains(&frame)) {
+        let path = work.file(&format!("{name}-hook.rgba"));
+        fs::write(&path, painter.hook_rgba(frame)).map_err(RenderError::io(&path))?;
+        overlays.push(rgba_overlay(path, hook.placement));
+    }
+    if let Some(band) = graphics.band()
+        && painter.band(frame).is_some()
+    {
+        let path = work.file(&format!("{name}-band.rgba"));
+        fs::write(&path, painter.band_rgba(frame)).map_err(RenderError::io(&path))?;
+        overlays.push(rgba_overlay(path, band));
+    }
+    Ok(overlays)
+}
+
+/// A one-picture raw RGBA overlay at `placement`.
+fn rgba_overlay(path: PathBuf, placement: sabicut_overlay::Placement) -> Overlay {
+    Overlay {
+        source: OverlaySource::Rgba {
+            path,
+            width: placement.width,
+            height: placement.height,
+        },
+        x: placement.x,
+        y: placement.y,
+        frames: None,
+    }
 }
 
 /// Lays out the written stills on the contact sheet.

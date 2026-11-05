@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use sabicut_core::{Plan, Rational, Segment, Timeline, ValidationErrors};
+use sabicut_overlay::Graphics;
 
 use crate::error::RenderError;
 use crate::geometry::CropRect;
@@ -56,13 +57,15 @@ pub(crate) struct CutJob {
     pub(crate) audio: AudioSpan,
 }
 
-/// A valid plan whose source clips have been probed.
+/// A valid plan whose source clips have been probed, with its captions and hook if it
+/// has them ([`Project::with_graphics`]).
 #[derive(Clone, Debug)]
 pub struct Project {
     timeline: Timeline,
     out: (u32, u32),
     sources: Vec<ProbedSource>,
     cuts: Vec<CutJob>,
+    graphics: Option<Graphics>,
 }
 
 /// Why a project could not be opened.
@@ -136,7 +139,26 @@ impl Project {
             out,
             sources,
             cuts,
+            graphics: None,
         })
+    }
+
+    /// The project with captions, the hook and subtitles drawn from `graphics` (made
+    /// from the same plan, for example with [`Graphics::load`]). Renders and previews
+    /// then show them, through the same code.
+    pub fn with_graphics(mut self, graphics: Option<Graphics>) -> Self {
+        self.graphics = graphics;
+        self
+    }
+
+    /// The captions, hook and subtitles, if any.
+    pub fn graphics(&self) -> Option<&Graphics> {
+        self.graphics.as_ref()
+    }
+
+    /// Whether anything is drawn over the video: captions or a hook.
+    pub fn draws_graphics(&self) -> bool {
+        self.graphics.as_ref().is_some_and(Graphics::draws)
     }
 
     /// The output timeline.

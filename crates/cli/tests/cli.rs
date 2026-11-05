@@ -181,7 +181,7 @@ fn render_writes_the_video_and_cover() {
     let cover = plan.with_extension("jpg");
     let out = stdout(&output);
     let lines: Vec<&str> = out.lines().collect();
-    assert_eq!(lines.len(), 3, "{out}");
+    assert_eq!(lines.len(), 2, "{out}");
     assert!(
         lines[0].starts_with(&format!(
             "ok: wrote {} (60 frames = 2.000 s at 30 fps, 1080x1920, -1",
@@ -194,16 +194,12 @@ fn render_writes_the_video_and_cover() {
         lines[1],
         format!("ok: wrote {} (cover: frame 30, 1.000 s)", cover.display())
     );
-    assert_eq!(
-        lines[2],
-        "note: [hook] not drawn yet; captions and the hook come in a later version"
-    );
     assert!(video.exists() && cover.exists());
-    assert!(
-        stderr(&output).starts_with("source a: "),
-        "{}",
-        stderr(&output)
-    );
+    // A plan without word timings gets no subtitles.
+    assert!(!plan.with_extension("srt").exists());
+    let log = stderr(&output);
+    assert!(log.starts_with("source a: "), "{log}");
+    assert!(log.contains("\nhook: frames 0..30 in a 756x"), "{log}");
 }
 
 #[test]

@@ -16,7 +16,12 @@ Safety: each run gets its own systemd scope with MemoryMax and no swap, so a run
 render is killed instead of pushing the shared laptop into swap. A run starts only when
 no compiler is running and enough memory is free.
 
+With --captions WORDS.json, the plan also gets word-by-word captions from those word
+timings (read as the source's speech; the bench transcripts are 10 minutes long too) and
+a 2 s hook, to measure what captions cost.
+
 Usage: spikes/render-bench/bench.py [--preset medium --preset veryfast] [--ffmpeg PATH]
+                                    [--captions WORDS.json]
 """
 
 import argparse
@@ -92,9 +97,10 @@ def make_source(work, ffmpeg):
     return path
 
 
-def make_plan(work, source):
+def make_plan(work, source, words=None):
     """20 cuts of 2.4 to 3.6 s spread over the 10 minutes; cuts 7 and 8 swapped (a retake
-    used out of order); a punch-in on every third cut, and an in-and-out on cut 10."""
+    used out of order); a punch-in on every third cut, and an in-and-out on cut 10. With
+    `words`, captions from those word timings and a hook."""
     cuts = []
     for k in range(CUTS):
         start = 12.0 + 29.0 * k + 0.37 * (k % 3)
@@ -121,7 +127,19 @@ def make_plan(work, source):
         if zooms:
             inner = ", ".join(f"{{ at = {at:.3f}, scale = {scale:.2f} }}" for at, scale in zooms)
             lines.append(f"zoom = [{inner}]")
-    plan = work / "plan.toml"
+    name = "plan.toml"
+    if words:
+        # No font, colour or outline: the defaults (the bundled Anton, gold, 10 px).
+        lines += [
+            "[hook]",
+            'text = "Ten minutes in sixty seconds"',
+            "dur = 2.0",
+            "[captions]",
+            f"words = {json.dumps(str(Path(words).resolve()))}",
+            'keywords = ["Alice", "rabbit"]',
+        ]
+        name = "plan-captions.toml"
+    plan = work / name
     plan.write_text("\n".join(lines) + "\n")
     return plan
 
@@ -269,6 +287,7 @@ def main():
     parser.add_argument("--ffmpeg", help="ffmpeg binary to render with (sets SABICUT_FFMPEG)")
     parser.add_argument("--work", default=str(Path.home() / ".cache" / "sabicut-render-bench"))
     parser.add_argument("--sabicut", default=str(ROOT / "target" / "release" / "sabicut"))
+    parser.add_argument("--captions", help="words.json to caption the plan with")
     args = parser.parse_args()
     presets = args.preset or ["medium", "veryfast"]
     work = Path(args.work)
@@ -282,17 +301,19 @@ def main():
 
     wait_until_quiet()
     source = make_source(work, "ffmpeg")
-    plan = make_plan(work, source)
+    plan = make_plan(work, source, args.captions)
     cuts = timeline_frames(args.sabicut, plan)
     for preset in presets:
         wait_until_quiet()
-        output = work / f"out-{preset}-{version}.mp4"
+        suffix = "-captions" if args.captions else ""
+        output = work / f"out-{preset}-{version}{suffix}.mp4"
         print(f"rendering with preset {preset}, ffmpeg {version}...", flush=True)
         load_before = os.getloadavg()[0]
         result = run_render(args.sabicut, plan, output, preset, env)
         frames, wrong = frame_exact(ffmpeg, output, cuts)
         result.update(
             preset=preset,
+            captions=bool(args.captions),
             ffmpeg=version,
             cuts=len(cuts),
             frames=frames,
