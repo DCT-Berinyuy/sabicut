@@ -889,12 +889,42 @@ fn a_cut_past_the_end_of_its_source_is_rejected() {
     );
 }
 
+/// Writes an executable shell script and runs it once, retrying while the file is busy.
+///
+/// A test thread that forks while another one has the script open for writing gives
+/// the child a copy of that file descriptor, which it holds until it execs. Running
+/// the script meanwhile fails with ETXTBSY ("Text file busy"). Once a run succeeds, no
+/// process has the script open for writing, and nothing opens it again, so later runs
+/// cannot fail that way.
+#[cfg(unix)]
+fn write_script(path: &Path, text: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    use std::process::Stdio;
+
+    std::fs::write(path, text).unwrap();
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mut busy = 0;
+    loop {
+        let run = Command::new(path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        match run {
+            Ok(_) => return,
+            Err(error) if error.kind() == std::io::ErrorKind::ExecutableFileBusy && busy < 500 => {
+                busy += 1;
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(error) => panic!("cannot run {}: {error}", path.display()),
+        }
+    }
+}
+
 /// A stand-in ffmpeg without zscale, and an ffprobe that describes an HLG clip.
 #[cfg(unix)]
 #[test]
 fn hdr_without_zscale_fails_with_a_clear_message() {
-    use std::os::unix::fs::PermissionsExt;
-
     let dir = scratch("no-zscale");
     let filters: String = [
         "fps",
@@ -927,22 +957,17 @@ fn hdr_without_zscale_fails_with_a_clear_message() {
     .map(|f| format!(" ... {f:<16} V->V       x\\n"))
     .collect();
     let ffmpeg = dir.join("ffmpeg");
-    std::fs::write(
+    write_script(
         &ffmpeg,
-        format!(
+        &format!(
             "#!/bin/sh\ncase \"$2\" in\n-version) echo 'ffmpeg version 6.1.1-fake Copyright';;\n-filters) printf '{filters}';;\n-encoders) printf ' V....D libx264  x\\n A....D aac  x\\n V....D png  x\\n V....D mjpeg  x\\n';;\nesac\n"
         ),
-    )
-    .unwrap();
+    );
     let ffprobe = dir.join("ffprobe");
-    std::fs::write(
+    write_script(
         &ffprobe,
         "#!/bin/sh\necho '{\"streams\": [{\"codec_type\": \"video\", \"codec_name\": \"hevc\", \"width\": 1920, \"height\": 1080, \"color_transfer\": \"arib-std-b67\", \"duration\": \"60.0\"}], \"format\": {\"duration\": \"60.0\"}}'\n",
-    )
-    .unwrap();
-    for script in [&ffmpeg, &ffprobe] {
-        std::fs::set_permissions(script, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
+    );
     let tools = Ffmpeg::new(ffmpeg, ffprobe).unwrap();
     let (plan, _) = plan(
         &dir,

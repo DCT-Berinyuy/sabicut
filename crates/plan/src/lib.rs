@@ -7,6 +7,8 @@
 //! - **False starts**, a phrase broken off and said again ("So today we… So today we're
 //!   going to…"), are cut, keeping the last take.
 //! - **Every cut lands outside every word**, on a frame boundary of the output rate.
+//! - **No cut runs past the end of a clip's video** ([`SourceInput::video_end`]), which
+//!   may come before the end of its audio.
 //! - **Keywords** get a punch-in zoom where they are said.
 //!
 //! The result is a [`sabicut_core::Plan`] that passes validation, the same plan as TOML
@@ -31,6 +33,7 @@
 //!     words_path: "clip.words.json".into(),
 //!     transcript,
 //!     crop_x: 0.5,
+//!     video_end: Some(9.0), // where ffprobe says the video ends
 //! };
 //! let options = Options { keywords: vec!["Rust".into()], ..Options::default() };
 //! let planned = plan(&[source], &options)?;
@@ -84,6 +87,18 @@ pub struct SourceInput {
     pub transcript: Transcript,
     /// Horizontal centre of the 9:16 crop, from 0 to 1.
     pub crop_x: f64,
+    /// Where the clip's video ends, in seconds from the start of the file, if known. No
+    /// cut ends after it: phones often stop the video a little before the audio, and the
+    /// word timings only say where the audio ends. `sabicut plan` reads it with ffprobe;
+    /// `None` lets cuts run to the end of the audio.
+    pub video_end: Option<f64>,
+}
+
+impl SourceInput {
+    /// The last frame boundary that the clip's cuts can reach on `grid`.
+    pub(crate) fn end_of_media(&self, grid: Grid) -> i64 {
+        sections::end_of_media(self.transcript.duration(), self.video_end, grid)
+    }
 }
 
 /// The id of source number `index` (from 0): "a" to "z", then "aa", "ab", and so on.
@@ -280,6 +295,7 @@ pub fn plan(sources: &[SourceInput], options: &Options) -> Result<Planned, PlanE
             .collect();
         plans.push(sections::plan_source(
             &source.transcript,
+            source.end_of_media(grid),
             &norms,
             options,
             grid,
@@ -397,6 +413,13 @@ fn check_sources(sources: &[SourceInput]) -> Result<(), PlanError> {
                 source.crop_x
             )));
         }
+        if let Some(end) = source.video_end
+            && !(end.is_finite() && end >= 0.0)
+        {
+            return Err(problem(format!(
+                "video_end must be a time of 0 s or more, got {end}"
+            )));
+        }
         source
             .transcript
             .validate()
@@ -455,6 +478,7 @@ fn report(
                 source.id, source.path
             ));
         }
+        warnings.extend(speech_after_video(source, grid));
         let file_name = Path::new(&source.path)
             .file_name()
             .map(|name| name.to_string_lossy().into_owned());
@@ -517,6 +541,22 @@ fn report(
         mid_word: totals.mid_word,
         warnings,
     }
+}
+
+/// A warning when the clip's video ends before its speech does, so that no cut can keep
+/// the rest of the speech.
+fn speech_after_video(source: &SourceInput, grid: Grid) -> Option<String> {
+    let video_end = source.video_end?;
+    let last = source.transcript.words().last()?;
+    let end = source.end_of_media(grid);
+    let audio_end = sections::end_of_media(source.transcript.duration(), None, grid);
+    (end < audio_end && grid.is_before(end, micros(last.end()))).then(|| {
+        format!(
+            "source {}: the video ends at {video_end:.3} s, before the speech does ({:.3} s), so the speech after it is cut",
+            source.id,
+            last.end()
+        )
+    })
 }
 
 #[cfg(test)]

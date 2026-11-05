@@ -40,6 +40,7 @@ fn check(name: &str, fixes: &str) {
         words_path: format!("{name}.json"),
         transcript,
         crop_x: 0.5,
+        video_end: None,
     };
     let planned = plan(&[source], &Options::default()).unwrap();
     let report = planned.report();

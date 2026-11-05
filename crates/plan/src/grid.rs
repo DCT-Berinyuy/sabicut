@@ -55,6 +55,11 @@ impl Grid {
         frame * MICROS > us * self.fps
     }
 
+    /// Whether boundary `frame` lies strictly before `us`.
+    pub(crate) fn is_before(self, frame: i64, us: i64) -> bool {
+        frame * MICROS < us * self.fps
+    }
+
     /// Whether some boundary lies strictly between `start_us` and `end_us`.
     pub(crate) fn fits_between(self, start_us: i64, end_us: i64) -> bool {
         self.after(start_us) <= self.before(end_us)
@@ -118,6 +123,15 @@ mod tests {
         assert!(grid.within(30, micros(0.9), micros(1.0)));
         assert!(grid.within(30, micros(1.0), micros(1.2)));
         assert!(!grid.within(30, micros(1.001), micros(1.2)));
+    }
+
+    #[test]
+    fn before_and_after_are_strict() {
+        let grid = Grid::new(30);
+        assert!(grid.is_before(30, micros(1.001)));
+        assert!(!grid.is_before(30, micros(1.0)));
+        assert!(grid.is_after(30, micros(0.999)));
+        assert!(!grid.is_after(30, micros(1.0)));
     }
 
     #[test]

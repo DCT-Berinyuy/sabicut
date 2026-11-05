@@ -11,6 +11,7 @@ use sabicut_plan::{
     CaptionStyle, DeadAir, FalseStarts, HookText, Options, PlanError, Reason, Report, SourceInput,
     Zooms, source_id,
 };
+use sabicut_render::{Ffmpeg, ProbeError, ToolError, probe};
 
 use crate::files::{self, FileError};
 use crate::fix;
@@ -141,6 +142,13 @@ pub(crate) enum Error {
     },
     #[error("{}: the plan can only hold paths written in UTF-8", .0.display())]
     NotUtf8(PathBuf),
+    #[error("cannot read where each clip's video ends: {0}")]
+    Tools(#[source] ToolError),
+    #[error("{}: cannot read where its video ends: {source}", .path.display())]
+    Probe {
+        path: PathBuf,
+        source: Box<ProbeError>,
+    },
     #[error(transparent)]
     Plan(#[from] PlanError),
 }
@@ -163,7 +171,7 @@ pub(crate) fn run(args: &PlanArgs, out: &mut impl Write) -> Result<(), CliError>
         None => None,
     };
 
-    let mut sources = Vec::with_capacity(args.media.len());
+    let mut clips = Vec::with_capacity(args.media.len());
     for (index, media) in args.media.iter().enumerate() {
         fs::metadata(media).map_err(|source| Error::Media {
             path: media.clone(),
@@ -185,14 +193,16 @@ pub(crate) fn run(args: &PlanArgs, out: &mut impl Write) -> Result<(), CliError>
         if let Some((path, fixes)) = &fixes {
             transcript = fix::apply(&transcript, fixes, path)?.into_transcript();
         }
-        sources.push(SourceInput {
+        clips.push(SourceInput {
             id: source_id(index),
             path: relative(&plan_folder, media)?,
             words_path: relative(&plan_folder, &words)?,
             transcript,
             crop_x: crop_x(args, index),
+            video_end: None,
         });
     }
+    let sources = with_video_ends(&args.media, clips)?;
 
     let options = options(args, &plan_folder)?;
     let planned = sabicut_plan::plan(&sources, &options).map_err(Error::from)?;
@@ -210,6 +220,31 @@ pub(crate) fn run(args: &PlanArgs, out: &mut impl Write) -> Result<(), CliError>
         out.write_all(summary.as_bytes())?;
     }
     Ok(())
+}
+
+/// The clips, each with where its video ends, read with ffprobe. Phones often stop the
+/// video a little before the audio, and no cut may go past the video's last frame. A
+/// file without video, such as the benchmark's WAV readings (docs/bench/plan.md), has no
+/// frames to run past, so its cuts run to the end of its audio as before.
+fn with_video_ends(media: &[PathBuf], clips: Vec<SourceInput>) -> Result<Vec<SourceInput>, Error> {
+    let tools = Ffmpeg::from_env().map_err(Error::Tools)?;
+    media
+        .iter()
+        .zip(clips)
+        .map(|(path, clip)| {
+            let video_end = match probe(&tools, path) {
+                Ok(info) => info.video_end,
+                Err(ProbeError::NoVideo) => None,
+                Err(source) => {
+                    return Err(Error::Probe {
+                        path: path.clone(),
+                        source: Box::new(source),
+                    });
+                }
+            };
+            Ok(SourceInput { video_end, ..clip })
+        })
+        .collect()
 }
 
 fn check_counts(args: &PlanArgs) -> Result<(), Error> {

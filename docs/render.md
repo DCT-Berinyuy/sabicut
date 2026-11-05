@@ -30,7 +30,7 @@ sabicut render plan.toml -o short.mp4 --cover-at 3.2 --preset veryfast
 
 ffmpeg and ffprobe 6.1 or newer, on `PATH` or named by `SABICUT_FFMPEG` and
 `SABICUT_FFPROBE` (without `SABICUT_FFPROBE`, the `ffprobe` next to `SABICUT_FFMPEG` is
-used). `sabicut analyze` uses the same setting. Tested with Ubuntu 24.04's 6.1.1 (CI), a 6.1.3 static build and Arch's 9.0.2.
+used). `sabicut analyze` and `sabicut plan` use the same setting. Tested with Ubuntu 24.04's 6.1.1 (CI), a 6.1.3 static build and Arch's 9.0.2.
 The build needs:
 
 - encoders `libx264`, `aac`, `png` (stills) and `mjpeg` (cover);
@@ -112,7 +112,8 @@ frames. Two edge cases are padded:
 - A cut that starts before the first video frame (the file starts with audio) repeats
   the first frame for those slots.
 - A cut that ends less than one frame after the end of the source holds the last frame.
-  A cut that ends more than a frame after it is an error naming the cut.
+  A cut that ends more than a frame after it is an error naming the cut. `sabicut plan`
+  never writes one: it ends every cut by the end of its clip's video.
 
 The tests check this on a 60 fps clip, a rotated portrait clip, and a variable-frame-rate
 clip with jittered timestamps, dropped frames and a 1.5 s start offset. The clips carry a
