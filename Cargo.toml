@@ -17,6 +17,7 @@ categories = ["multimedia::video"]
 [workspace.dependencies]
 sabicut-core = { path = "crates/core", version = "0.1.0" }
 sabicut-analyze = { path = "crates/analyze", version = "0.1.0" }
+sabicut-plan = { path = "crates/plan", version = "0.1.0" }
 sabicut-render = { path = "crates/render", version = "0.1.0" }
 clap = { version = "4.6.7", features = ["derive"] }
 schemars = "1.2.3"

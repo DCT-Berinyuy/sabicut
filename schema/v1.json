@@ -5,7 +5,8 @@
       "description": "Word-by-word caption settings.",
       "properties": {
         "active": {
-          "description": "Colour of the word being spoken and of keywords, as #RRGGBB.",
+          "default": "#FFC400",
+          "description": "Colour of the word being spoken and of keywords, as #RRGGBB. Gold (#FFC400) by\ndefault.",
           "pattern": "^#[0-9A-Fa-f]{6}$",
           "type": "string"
         },
@@ -15,7 +16,7 @@
           "type": "string"
         },
         "font": {
-          "description": "Caption font file.",
+          "description": "Caption font file. Without it, captions use the Anton font that sabicut bundles.",
           "minLength": 1,
           "type": "string"
         },
@@ -28,24 +29,19 @@
           "type": "array"
         },
         "stroke": {
-          "description": "Outline width around caption text, in output pixels.",
+          "default": 10,
+          "description": "Outline width around caption text, in output pixels. 10 by default.",
           "format": "uint32",
           "maximum": 64,
           "minimum": 0,
           "type": "integer"
         },
         "words": {
-          "description": "Word timings file (words.json).",
+          "description": "Word timings file (words.json) of the only source, when it has no words of its\nown. Ignored when the plan has more than one source: each source then names its\nown.",
           "minLength": 1,
           "type": "string"
         }
       },
-      "required": [
-        "words",
-        "font",
-        "active",
-        "stroke"
-      ],
       "type": "object"
     },
     "Cut": {
@@ -176,6 +172,11 @@
         },
         "path": {
           "description": "Path to the clip file.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "words": {
+          "description": "Word timings file (words.json) of this clip, for the captions. When the plan has\n[captions] and more than one source, every source that a cut uses needs one.",
           "minLength": 1,
           "type": "string"
         }

@@ -2,9 +2,10 @@
 # An example Sabicut edit plan (schema v1). Try:
 #   cargo run -- validate examples/plan.toml
 #   cargo run -- timeline examples/plan.toml
-# Paths are relative to this file. The clips and font are not part of the repository,
-# so only `validate` and `timeline` work on this example. Its word timings and fixes
-# are: try `cargo run -- fix examples/words.json examples/fixes.toml`.
+# Paths are relative to this file. The clips, the second clip's word timings, and the
+# font are not part of the repository, so only `validate` and `timeline` work on this
+# example. The first clip's word timings and the fixes are: try
+# `cargo run -- fix examples/words.json examples/fixes.toml`.
 
 schema = 1
 
@@ -16,11 +17,13 @@ out = { w = 1080, h = 1920 }
 id = "a"
 path = "raw/IMG_0412.mov"
 crop_x = 0.42                       # centre of the 9:16 window, 0–1
+words = "words.json"                # word timings for the captions
 
 [[source]]
 id = "b"
 path = "raw/IMG_0415.mov"
 crop_x = 0.5
+words = "IMG_0415.words.json"
 
 [[cut]]
 src = "a"
@@ -43,8 +46,8 @@ out = 4.0
 text = "Stop leaking your API keys"
 dur = 2.0
 
+# With more than one source, each source names its own word timings (`words` above).
 [captions]
-words = "words.json"
 fixes = "fixes.toml"
 keywords = ["Rust", "Supabase"]
 font = "fonts/Anton-Regular.ttf"

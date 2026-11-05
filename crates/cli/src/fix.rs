@@ -74,16 +74,7 @@ pub(crate) fn run(args: &FixArgs, out: &mut impl Write) -> Result<(), CliError> 
     }
     let transcript = load_words(&args.words)?;
     let fixes = load_fixes(&args.fixes)?;
-    let fixed = apply_fixes(&transcript, &fixes).map_err(|source| match source {
-        FixError::Invalid(errors) => Error::InvalidFixes {
-            path: args.fixes.clone(),
-            errors,
-        },
-        source => Error::Apply {
-            path: args.fixes.clone(),
-            source,
-        },
-    })?;
+    let fixed = apply(&transcript, &fixes, &args.fixes)?;
 
     let report = report(args, &fixes, &fixed);
     if to_stdout {
@@ -104,7 +95,22 @@ pub(crate) fn run(args: &FixArgs, out: &mut impl Write) -> Result<(), CliError> 
     Ok(())
 }
 
-fn load_words(path: &Path) -> Result<Transcript, Error> {
+/// Applies `fixes`, read from `path`, to the words.
+pub(crate) fn apply(transcript: &Transcript, fixes: &Fixes, path: &Path) -> Result<Fixed, Error> {
+    apply_fixes(transcript, fixes).map_err(|source| match source {
+        FixError::Invalid(errors) => Error::InvalidFixes {
+            path: path.to_owned(),
+            errors,
+        },
+        source => Error::Apply {
+            path: path.to_owned(),
+            source,
+        },
+    })
+}
+
+/// Reads and validates a words.json file.
+pub(crate) fn load_words(path: &Path) -> Result<Transcript, Error> {
     let text = files::read_text(path, MAX_WORDS_BYTES, "words.json")?;
     let transcript = Transcript::from_json_str(&text).map_err(|source| Error::Words {
         path: path.to_owned(),
@@ -119,7 +125,8 @@ fn load_words(path: &Path) -> Result<Transcript, Error> {
     Ok(transcript)
 }
 
-fn load_fixes(path: &Path) -> Result<Fixes, Error> {
+/// Reads a fixes.toml file.
+pub(crate) fn load_fixes(path: &Path) -> Result<Fixes, Error> {
     let text = files::read_text(path, MAX_FIXES_BYTES, "fixes.toml")?;
     Fixes::from_toml_str(&text).map_err(|source| Error::Fixes {
         path: path.to_owned(),

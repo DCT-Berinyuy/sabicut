@@ -85,6 +85,11 @@ pub struct Source {
     /// Horizontal centre of the 9:16 crop window, from 0 (left edge) to 1 (right edge).
     #[schemars(range(min = 0.0, max = 1.0))]
     crop_x: f64,
+    /// Word timings file (words.json) of this clip, for the captions. When the plan has
+    /// [captions] and more than one source, every source that a cut uses needs one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "String", length(min = 1))]
+    words: Option<String>,
 }
 
 /// A range of one source clip that is kept in the output.
@@ -137,9 +142,12 @@ pub struct Hook {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Captions {
-    /// Word timings file (words.json).
-    #[schemars(length(min = 1))]
-    words: String,
+    /// Word timings file (words.json) of the only source, when it has no words of its
+    /// own. Ignored when the plan has more than one source: each source then names its
+    /// own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "String", length(min = 1))]
+    words: Option<String>,
     /// Replacement rules applied to the words (fixes.toml).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "String", length(min = 1))]
@@ -148,15 +156,27 @@ pub struct Captions {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(inner(pattern(r"\S")))]
     keywords: Vec<String>,
-    /// Caption font file.
-    #[schemars(length(min = 1))]
-    font: String,
-    /// Colour of the word being spoken and of keywords, as #RRGGBB.
-    #[schemars(pattern(r"^#[0-9A-Fa-f]{6}$"))]
-    active: String,
-    /// Outline width around caption text, in output pixels.
-    #[schemars(range(max = MAX_STROKE))]
-    stroke: u32,
+    /// Caption font file. Without it, captions use the Anton font that sabicut bundles.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "String", length(min = 1))]
+    font: Option<String>,
+    /// Colour of the word being spoken and of keywords, as #RRGGBB. Gold (#FFC400) by
+    /// default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        with = "String",
+        pattern(r"^#[0-9A-Fa-f]{6}$"),
+        extend("default" = Captions::DEFAULT_ACTIVE)
+    )]
+    active: Option<String>,
+    /// Outline width around caption text, in output pixels. 10 by default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        with = "u32",
+        range(max = MAX_STROKE),
+        extend("default" = Captions::DEFAULT_STROKE)
+    )]
+    stroke: Option<u32>,
 }
 
 /// Why a `plan.toml` could not be read.
@@ -235,6 +255,22 @@ impl Plan {
     pub fn captions(&self) -> Option<&Captions> {
         self.captions.as_ref()
     }
+
+    /// The word timings file (words.json) for the captions of source `id`, as written
+    /// in the plan: the source's own `words`, or else `captions.words`, but only when
+    /// the plan has a single source.
+    ///
+    /// Returns `None` when no source has this id or there are no word timings for it.
+    pub fn caption_words(&self, id: &str) -> Option<&str> {
+        let source = self.sources.iter().find(|source| source.id == id)?;
+        source.words.as_deref().or_else(|| {
+            if self.sources.len() == 1 {
+                self.captions.as_ref()?.words.as_deref()
+            } else {
+                None
+            }
+        })
+    }
 }
 
 impl Meta {
@@ -275,6 +311,12 @@ impl Source {
     /// Horizontal centre of the 9:16 crop window, from 0 to 1.
     pub fn crop_x(&self) -> f64 {
         self.crop_x
+    }
+
+    /// Word timings file of this clip, if the plan names one. To find the words for the
+    /// captions, use [`Plan::caption_words`].
+    pub fn words(&self) -> Option<&str> {
+        self.words.as_deref()
     }
 }
 
@@ -325,9 +367,15 @@ impl Hook {
 }
 
 impl Captions {
-    /// Word timings file.
-    pub fn words(&self) -> &str {
-        &self.words
+    /// The active-word colour when the plan does not set one: gold.
+    pub const DEFAULT_ACTIVE: &'static str = "#FFC400";
+    /// The outline width when the plan does not set one, in output pixels.
+    pub const DEFAULT_STROKE: u32 = 10;
+
+    /// Word timings file of the only source, if the plan names one here. To find the
+    /// words for the captions, use [`Plan::caption_words`].
+    pub fn words(&self) -> Option<&str> {
+        self.words.as_deref()
     }
 
     /// Replacement rules file, if any.
@@ -340,18 +388,20 @@ impl Captions {
         &self.keywords
     }
 
-    /// Caption font file.
-    pub fn font(&self) -> &str {
-        &self.font
+    /// Caption font file, or `None` for the Anton font that sabicut bundles.
+    pub fn font(&self) -> Option<&str> {
+        self.font.as_deref()
     }
 
-    /// Active-word colour as written in the plan (`#RRGGBB`).
+    /// Active-word colour (`#RRGGBB`): as written in the plan, or
+    /// [`Captions::DEFAULT_ACTIVE`].
     pub fn active(&self) -> &str {
-        &self.active
+        self.active.as_deref().unwrap_or(Self::DEFAULT_ACTIVE)
     }
 
-    /// Outline width around caption text, in output pixels.
+    /// Outline width around caption text, in output pixels: as written in the plan, or
+    /// [`Captions::DEFAULT_STROKE`].
     pub fn stroke(&self) -> u32 {
-        self.stroke
+        self.stroke.unwrap_or(Self::DEFAULT_STROKE)
     }
 }

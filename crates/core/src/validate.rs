@@ -128,6 +128,7 @@ pub(crate) fn check(plan: &Plan) -> Result<Timeline, ValidationErrors> {
         .and_then(|hook| check_hook(&mut report, hook, grid, output_frames));
     if let Some(captions) = plan.captions() {
         check_captions(&mut report, captions);
+        check_caption_words(&mut report, captions, plan.sources(), plan.cuts());
     }
     match (report.finish(), builder) {
         (Err(errors), _) => Err(errors),
@@ -194,6 +195,9 @@ fn check_sources<'p>(report: &mut Report, sources: &'p [Source]) -> HashMap<&'p 
                 format!("source[{i}].crop_x"),
                 format!("must be between 0 and 1, got {crop_x}"),
             );
+        }
+        if source.words().is_some_and(str::is_empty) {
+            report.push(format!("source[{i}].words"), "must not be empty");
         }
     }
     ids
@@ -416,7 +420,7 @@ fn check_hook(
 }
 
 fn check_captions(report: &mut Report, captions: &Captions) {
-    if captions.words().is_empty() {
+    if captions.words().is_some_and(str::is_empty) {
         report.push("captions.words", "must not be empty");
     }
     if captions.fixes().is_some_and(str::is_empty) {
@@ -427,7 +431,7 @@ fn check_captions(report: &mut Report, captions: &Captions) {
             report.push(format!("captions.keywords[{k}]"), "must not be blank");
         }
     }
-    if captions.font().is_empty() {
+    if captions.font().is_some_and(str::is_empty) {
         report.push("captions.font", "must not be empty");
     }
     if !is_hex_colour(captions.active()) {
@@ -447,6 +451,26 @@ fn check_captions(report: &mut Report, captions: &Captions) {
                 captions.stroke()
             ),
         );
+    }
+}
+
+/// Every source that a cut uses needs word timings for its captions: its own `words`,
+/// or, when it is the plan's only source, `captions.words`.
+fn check_caption_words(report: &mut Report, captions: &Captions, sources: &[Source], cuts: &[Cut]) {
+    let used = |source: &Source| cuts.iter().any(|cut| cut.src() == source.id());
+    if let [only] = sources {
+        if used(only) && only.words().is_none() && captions.words().is_none() {
+            report.push("captions.words", "is required when source[0] has no words");
+        }
+        return;
+    }
+    for (i, source) in sources.iter().enumerate() {
+        if used(source) && source.words().is_none() {
+            report.push(
+                format!("source[{i}].words"),
+                "is required: the plan has [captions] and more than one source",
+            );
+        }
     }
 }
 
