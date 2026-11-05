@@ -3,9 +3,12 @@
 //!
 //! A new page starts after a sentence ends, at a pause of half a second or more, after
 //! a clause once the page has three words, at eight words, and whenever the next word
-//! would need a third line. Lines are balanced (two lines of similar width rather than
-//! a full line and a lone word). A page shows from its first word until the next page
-//! starts, or until 0.4 s after its last word if the speaker pauses.
+//! would need a third line. A sentence or clause shorter than half a second that the
+//! next word follows straight on (the end of a sentence from before a cut, say) stays
+//! on the next page instead of flashing by. Lines are balanced (two lines of similar
+//! width rather than a full line and a lone word). A page shows from its first word
+//! until the next page starts, or until 0.4 s after its last word if the speaker
+//! pauses.
 
 use std::ops::Range;
 use std::sync::Arc;
@@ -34,6 +37,8 @@ const MAX_WORDS: usize = 8;
 const CLAUSE_WORDS: usize = 3;
 /// A pause this long starts a new page.
 const PAGE_PAUSE_SECONDS: f64 = 0.5;
+/// A sentence or clause shorter than this does not end a page on its own.
+const MIN_PAGE_SECONDS: f64 = 0.5;
 /// How long a page stays after its last word when the speaker pauses.
 const HOLD_SECONDS: f64 = 0.4;
 /// A word stays active through a gap this short, so the highlight does not flicker
@@ -271,6 +276,7 @@ fn group_pages(
     timing: Timing,
 ) -> Vec<Range<usize>> {
     let pause = frames_for(PAGE_PAUSE_SECONDS, timing.fps);
+    let shortest = frames_for(MIN_PAGE_SECONDS, timing.fps);
     let fits = |range: Range<usize>| {
         widths
             .get(range)
@@ -284,15 +290,16 @@ fn group_pages(
             continue;
         }
         let count = index - start;
-        let breaks = match words.get(index - 1) {
-            Some(previous) => {
-                ends_sentence(&previous.text)
-                    || word.start.saturating_sub(previous.end) >= pause
-                    || (ends_clause(&previous.text) && count >= CLAUSE_WORDS)
+        let breaks = match (words.get(index - 1), words.get(start)) {
+            (Some(previous), Some(first)) => {
+                let readable = previous.end.saturating_sub(first.start) >= shortest;
+                word.start.saturating_sub(previous.end) >= pause
+                    || (readable && ends_sentence(&previous.text))
+                    || (readable && ends_clause(&previous.text) && count >= CLAUSE_WORDS)
                     || count >= MAX_WORDS
                     || !fits(start..index + 1)
             }
-            None => false,
+            _ => false,
         };
         if breaks {
             pages.push(start..index);
@@ -394,16 +401,16 @@ mod tests {
     #[test]
     fn pages_break_at_sentences_pauses_clauses_and_width() {
         let words = [
-            word("One", 0, 5),
-            word("two.", 5, 10),
-            word("Three", 10, 15),
-            word("four", 15, 20),
+            word("One", 0, 10),
+            word("two.", 10, 20),
+            word("Three", 20, 30),
+            word("four", 30, 40),
             // A pause of 15 frames (0.5 s).
-            word("five", 35, 40),
-            word("six,", 40, 45),
-            word("seven", 45, 50),
-            word("eight,", 50, 55),
-            word("nine", 55, 60),
+            word("five", 55, 65),
+            word("six,", 65, 75),
+            word("seven", 75, 85),
+            word("eight,", 85, 95),
+            word("nine", 95, 105),
         ];
         let widths = vec![100.0; words.len()];
         let pages = group_pages(&words, &widths, 10.0, 1000.0, TIMING);
@@ -411,6 +418,19 @@ mod tests {
         // Only two words fit on each of the two lines.
         let narrow = group_pages(&words[4..], &widths[4..], 10.0, 210.0, TIMING);
         assert_eq!(narrow, [0..4, 4..5]);
+    }
+
+    #[test]
+    fn a_fragment_too_short_to_read_stays_on_the_next_page() {
+        let words = [
+            word("it?\"", 4, 6),
+            word("\"And", 6, 12),
+            word("what", 12, 18),
+            word("now?\"", 18, 40),
+            word("Then", 40, 50),
+        ];
+        let pages = group_pages(&words, &[50.0; 5], 10.0, 1000.0, TIMING);
+        assert_eq!(pages, [0..4, 4..5]);
     }
 
     #[test]

@@ -3,9 +3,11 @@
 //!
 //! A cue ends after a sentence, at a pause of 0.6 s or more, after a clause once it
 //! has a full line of text, when it would last more than 7 s, and when the next word
-//! would not fit in two lines of 42 characters. Cues are timed from the first frame of
-//! their first word to the last frame of their last word, kept on screen at least 0.8 s
-//! when the next cue leaves room, and never overlap. Lines are balanced.
+//! would not fit in two lines of 42 characters. A phrase shorter than 0.8 s that the
+//! next one follows straight on (the end of a sentence from before a cut, say) runs on
+//! into the next cue instead of flashing by. Cues are timed from the first frame of
+//! their first word to the last frame of their last word, kept on screen at least
+//! 0.8 s when the next cue leaves room, and never overlap. Lines are balanced.
 
 use std::fmt::Write as _;
 
@@ -50,12 +52,13 @@ pub fn cues(words: &[OutputWord], fps: u32, total_frames: u64) -> Vec<Cue> {
             .get(index + 1)
             .and_then(|next| words.get(next.start))
             .map_or(total_frames, |word| word.start);
+        // A word shorter than a frame still gets one, which the next word may share, so
+        // the next cue's start can come before this cue's last frame: it wins.
         let end = last
             .end
             .max(first.start.saturating_add(min_frames))
             .min(next)
-            .min(total_frames)
-            .max(last.end.min(total_frames));
+            .min(total_frames);
         if end <= first.start {
             continue;
         }
@@ -107,6 +110,7 @@ fn chars(word: &OutputWord) -> f32 {
 fn group(words: &[OutputWord], fps: u32) -> Vec<std::ops::Range<usize>> {
     let pause = frames_for(CUE_PAUSE_SECONDS, fps);
     let longest = frames_for(MAX_CUE_SECONDS, fps);
+    let shortest = frames_for(MIN_CUE_SECONDS, fps);
     let lengths: Vec<f32> = words.iter().map(chars).collect();
     let fits = |range: std::ops::Range<usize>| {
         lengths
@@ -126,9 +130,11 @@ fn group(words: &[OutputWord], fps: u32) -> Vec<std::ops::Range<usize>> {
         let full_line = lengths.get(start..index).is_some_and(|l| {
             l.iter().sum::<f32>() + (l.len() as f32 - 1.0) >= MAX_LINE_CHARS as f32
         });
-        let breaks = ends_sentence(&previous.text)
-            || word.start.saturating_sub(previous.end) >= pause
-            || (ends_clause(&previous.text) && full_line)
+        // Too short to read on its own, unless a pause ends it anyway.
+        let readable = previous.end.saturating_sub(first.start) >= shortest;
+        let breaks = word.start.saturating_sub(previous.end) >= pause
+            || (readable && ends_sentence(&previous.text))
+            || (readable && ends_clause(&previous.text) && full_line)
             || word.end.saturating_sub(first.start) > longest
             || !fits(start..index + 1);
         if breaks {
@@ -182,29 +188,58 @@ mod tests {
         assert_eq!(timestamp(30 * 3723, 30), "01:02:03,000");
     }
 
+    fn spans(cues: Vec<Cue>) -> Vec<(u64, u64, Vec<String>)> {
+        cues.into_iter()
+            .map(|cue| (cue.start, cue.end, cue.lines))
+            .collect()
+    }
+
     #[test]
     fn cues_break_at_sentences_and_pauses_and_last_long_enough() {
         let words = [
-            word("Hello", 0, 6),
-            word("there.", 6, 12),
-            word("How", 14, 18),
-            word("are", 18, 21),
+            word("Hello", 0, 12),
+            word("there.", 12, 30),
+            word("How", 32, 36),
+            word("are", 36, 39),
             // A pause of 18 frames (0.6 s).
-            word("you?", 39, 45),
+            word("you?", 57, 63),
         ];
-        let cues = cues(&words, 30, 100);
-        let spans: Vec<(u64, u64, Vec<String>)> = cues
-            .into_iter()
-            .map(|cue| (cue.start, cue.end, cue.lines))
-            .collect();
         assert_eq!(
-            spans,
+            spans(cues(&words, 30, 120)),
             [
-                (0, 14, vec!["Hello there.".to_owned()]),
-                (14, 38, vec!["How are".to_owned()]),
-                (39, 63, vec!["you?".to_owned()]),
+                (0, 30, vec!["Hello there.".to_owned()]),
+                (32, 56, vec!["How are".to_owned()]),
+                (57, 81, vec!["you?".to_owned()]),
             ]
         );
+    }
+
+    #[test]
+    fn a_fragment_too_short_to_read_runs_on_into_the_next_cue() {
+        // The end of a sentence from before the cut, then the next one straight away.
+        let words = [
+            word("it?\"", 4, 6),
+            word("\"And", 6, 12),
+            word("what", 12, 18),
+            word("now?\"", 18, 40),
+        ];
+        assert_eq!(
+            spans(cues(&words, 30, 100)),
+            [(4, 40, vec!["it?\" \"And what now?\"".to_owned()])]
+        );
+    }
+
+    #[test]
+    fn cues_never_overlap_when_words_share_a_frame() {
+        // "là." is shorter than a frame: it gets frame 30, which "Banc." starts on too.
+        let words = [
+            word("Assis", 0, 20),
+            word("là.", 30, 31),
+            word("Banc.", 30, 52),
+        ];
+        let cues = cues(&words, 30, 100);
+        assert_eq!(cues.len(), 2, "{cues:?}");
+        assert_eq!((cues[0].end, cues[1].start), (30, 30));
     }
 
     #[test]

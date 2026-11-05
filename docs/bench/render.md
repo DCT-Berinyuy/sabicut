@@ -98,12 +98,42 @@ Options to bring 4K under 800 MB, not done yet because each costs something:
    of 10 frames.
 3. **Keep recommending 1080p recording** (PRD §13) and let 4K run slightly over budget.
 
+## With captions (F6)
+
+The same plan with word-by-word captions and a 2 s hook (`--captions`): the English
+benchmark transcript (`full-small-en.json`, 10 minutes, 2,063 words) is read as the
+source's speech, so every cut of the 60 s short has captions: 208 words on the output,
+29 subtitle cues. Run on
+5 November 2026 on the same laptop, ffmpeg 9.0.2. Each pair ran back to back, with the
+load average at 2.3 to 2.5 (the Copilot app and a browser in the background).
+
+| Preset | Captions | Wall time | Video | Peak memory (RSS / PSS) | Largest process | Wrong frames | Loudness | Load before |
+|---|---|---|---|---|---|---|---|---|
+| veryfast | no | 65.7 s | 55.6 s | 570 / 523 MB | 400 MB (encoder) | 0 of 1,800 | −13.8 LUFS | 2.5 |
+| veryfast | yes | 68.5 s | 58.7 s | 630 / 582 MB | 450 MB (encoder) | 0 of 1,800 | −13.8 LUFS | 2.3 |
+| medium | no | 98.1 s | 87.8 s | 670 / 623 MB | 496 MB (encoder) | 0 of 1,800 | −13.8 LUFS | 2.5 |
+| medium | yes | 103.6 s | 93.9 s | 691 / 645 MB | 515 MB (encoder) | 0 of 1,800 | −13.8 LUFS | 2.5 |
+| ultrafast | no | 53.7 s | 40.5 s | 354 / 311 MB | 207 MB (encoder) | 0 of 1,800 | −13.8 LUFS | 2.4 |
+| ultrafast | yes | 58.8 s | 45.5 s | 393 / 348 MB | 232 MB (encoder) | 0 of 1,800 | −13.8 LUFS | 2.5 |
+
+- **Time: 3 to 6 s more per 60 s short** (4 to 9%): drawing the band, piping it, and
+  the encoder's `overlay`. Single runs on this shared laptop vary more than that, though:
+  `medium` without captions took 111.0 s in an earlier run at the same load, and with
+  captions 135.4 s, so take the pairs, not single numbers.
+- **Memory: 20 to 60 MB more, peak 691 MB with `medium`**, still under the 800 MB
+  budget. The encoder holds a few band pictures in its input queue and the overlay's
+  frames; `sabicut` itself keeps the word pictures of one caption page.
+- **Before a fix, captions cost 70 MB with `medium`** (727 MB): the painter kept every
+  word picture it had drawn, up to 512, and ffmpeg queued 8 band pictures. It now starts
+  its cache again at every page and ffmpeg queues 4, like the video.
+
 ## Reproduce
 
 ```sh
 cargo build --release -p sabicut-cli
 python3 spikes/render-bench/bench.py                       # medium and veryfast
 python3 spikes/render-bench/bench.py --preset medium --ffmpeg /path/to/other/ffmpeg
+python3 spikes/render-bench/bench.py --preset medium --captions ~/.cache/sabicut/bench/words/full-small-en.json
 ```
 
 The script generates the source (about 430 MB, in `~/.cache/sabicut-render-bench`) on the

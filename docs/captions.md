@@ -61,6 +61,10 @@ Captions show a few words at a time, in **pages** of one or two lines. A page en
 - at 8 words;
 - when the next word would need a third line.
 
+A sentence or clause shorter than 0.5 s that the next word follows straight on does not
+end a page: the end of a sentence from before a cut (`it?"`) runs on into the next page
+instead of flashing by for a frame or two.
+
 A page appears with its first word and stays until the next page starts, or until 0.4 s
 after its last word when the speaker pauses. Its lines are balanced: two lines of similar
 width rather than a full line and a lone word.
@@ -122,7 +126,8 @@ the output timeline, with fixes applied and no styling:
 
 - a cue ends after a sentence, at a pause of 0.6 s or more, after a clause once it has a
   full line of text, before it would last more than 7 s, and when the next word would
-  not fit in two lines of 42 characters;
+  not fit in two lines of 42 characters; a phrase shorter than 0.8 s that the next one
+  follows straight on runs on into the next cue instead of flashing by;
 - it runs from the first frame of its first word to the last frame of its last word,
   stays on screen at least 0.8 s when the next cue leaves room, and never overlaps the
   next cue;
