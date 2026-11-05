@@ -176,8 +176,11 @@ directly instead, with tiny-skia, because:
   so cosmic-text's line breaking, rich-text spans and editing are not needed;
 - cosmic-text finds fonts through fontdb, which can fall back to fonts installed on the
   machine, and the same plan could then come out differently on two laptops;
-- it is much smaller (see the report in the pull request for the measured download and
-  binary sizes).
+- it is much smaller. Drawing the same outlined French line, rustybuzz adds 0.78 MB to a
+  stripped binary and downloads 1.25 MB of crates (18), against 2.28 MB and 8.11 MB (46
+  crates) for cosmic-text, and it builds in 25 s instead of 2 min 16 s (measured in
+  [`spikes/text-stack`](../spikes/text-stack/README.md)). With the font and the caption
+  code, F6 made the stripped `sabicut` binary 1.38 MB bigger (3.73 to 5.11 MB).
 
 rustybuzz does what matters for captions: kerning (GPOS and `kern`), mark positioning
 for accents, composing `e` + combining acute into `é`, and spaces such as the French

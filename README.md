@@ -345,6 +345,14 @@ cargo run -p sabicut-cli -- schema words > schema/words-v1.json
 cargo run -p sabicut-cli -- schema fixes > schema/fixes-v1.json
 ```
 
+The caption tests compare drawn frames and subtitles with committed files in
+`crates/overlay/tests/golden/`, pixel for pixel. After an intended change to how
+captions look, write new ones, look at the PNGs, and commit them:
+
+```sh
+SABICUT_BLESS=1 cargo test -p sabicut-overlay --test golden
+```
+
 The transcription tests that need real models are ignored by default, because CI has no
 models. With `ggml-tiny-q5_1.bin` and `ggml-silero-v6.2.0.bin` in a model folder and
 ffmpeg installed, run them with:

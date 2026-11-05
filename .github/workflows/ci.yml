@@ -37,7 +37,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends ffmpeg
           ffmpeg -hide_banner -version | sed -n 1p
-          for filter in zscale tonemap zoompan loudnorm afftdn acompressor xstack drawbox setparams; do
+          for filter in zscale tonemap zoompan loudnorm afftdn acompressor xstack drawbox setparams overlay; do
             ffmpeg -hide_banner -filters | grep -qw "$filter" || { echo "::error::ffmpeg lacks the $filter filter"; exit 1; }
           done
       - name: Test
