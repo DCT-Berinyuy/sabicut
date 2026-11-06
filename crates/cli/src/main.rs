@@ -21,7 +21,7 @@ use sabicut_core::{Fixes, ParseError, Plan, Timeline, Transcript, ValidationErro
 /// Plans are small text files; anything bigger is almost certainly the wrong file.
 const MAX_PLAN_BYTES: usize = 16 * 1024 * 1024;
 
-/// Sabicut, an offline video studio for communities.
+/// Sabicut, an offline AI video editor for creators.
 ///
 /// This version works with edit plans (plan.toml): it validates them, prints their
 /// JSON Schema, and prints the output timeline they produce. It also transcribes

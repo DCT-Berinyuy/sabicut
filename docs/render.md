@@ -21,7 +21,7 @@ sabicut render plan.toml -o short.mp4 --cover-at 3.2 --preset veryfast
 | `render --cover` | The cover JPG to write. Default: the video's path ending in `.jpg` |
 | `render --cover-at` | Output time of the cover frame in seconds. Default: 1 s, or the middle of a video shorter than 2 s |
 | `render --no-cover` | Write no cover |
-| `render --preset` | x264 speed preset: `medium` (default, personal use) or `veryfast` (hub); any x264 preset name works |
+| `render --preset` | x264 speed preset: `medium` (default, final renders) or `veryfast` (quick drafts); any x264 preset name works |
 | `preview --at` | Output times of the stills, comma-separated |
 | `preview -o, --out-dir` | Directory for the stills and sheet. Default: `<plan>-preview` next to the plan |
 | `preview --safe-zones` | Shade the areas the apps cover with their interface (see below) |

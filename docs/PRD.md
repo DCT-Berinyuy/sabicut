@@ -1,11 +1,12 @@
-# Sabicut — PRD (v0.3)
+# Sabicut — PRD (v0.4)
 
-> **An offline video studio for communities without laptops or cheap data.**
-> A Rust engine turns raw phone clips into captioned vertical shorts. One laptop "hub" serves a whole club over its own Wi-Fi: students upload from their phone browsers and get finished videos back. No internet, no data cost, no app to install.
+> **An offline AI video editor for creators who record on a laptop.**
+> A Rust engine turns raw recordings (phone clips, or OBS screen and webcam recordings) into captioned vertical shorts on your own laptop. No upload, no subscription, no internet. It starts with tech and education creators.
 >
 > *Sabi* is Pidgin for "to know / know-how".
 
-Owner: Mr. DCT (DevSafe) · **Status: ACTIVE (time-boxed)** · Updated: 2026-11-05
+Owner: Mr. DCT (DevSafe) · **Status: ACTIVE (time-boxed)** · Updated: 2026-11-07
+**Changes in v0.4:** Sabicut now targets laptop creators, starting with tech and education creators, instead of student communities (owner's decision, 2026-11-07). v0.2 builds automatic length and a local review page instead of the Wi-Fi hub, which moves to §11.
 
 ---
 
@@ -14,48 +15,50 @@ Owner: Mr. DCT (DevSafe) · **Status: ACTIVE (time-boxed)** · Updated: 2026-11-
 | Phase | Window | Exit criterion (must be met to continue) |
 |---|---|---|
 | **Engine v0.1** | 2026-11-02 → 2026-11-16 | One DCT Lab short made with Sabicut and published |
-| **Hub v0.2** | 2026-11-16 → 2026-11-30 | With internet **off**, 5 phones upload clips over the hub's Wi-Fi and each gets back a finished short |
-| **Pilot** | by 2026-12-07 | One real club session (GDGoC / Cyber Security Club / OWASP Yaoundé) in which at least 10 students each leave with a short |
+| **Creator v0.2** | 2026-11-16 → 2026-11-30 | From a 10-minute recording, Sabicut picks a short of 60 s or less that I review in the local review page and publish without re-picking sections by hand |
+| **Creator beta** | by 2026-12-07 | At least 5 creators other than me (from DCT Lab, GDGoC and OWASP Yaoundé) each publish a short made with Sabicut |
 
 **Kill/review rule:** if any phase misses its exit criterion by more than 1 week, stop and review before writing more code.
 
 ## 1. Problem
 
-Phone-first creators in Cameroon record good raw footage but struggle to turn it into shorts:
-- Cloud AI editors need uploads of large raw files over expensive mobile data, plus card-paid USD subscriptions.
-- Many students don't own a laptop. Clubs, schools, and cyber cafés usually have **one**.
+Creators who record on a laptop (screen recordings, webcam talks, lessons, phone clips copied over) spend more time editing than recording:
+- Cutting pauses and false starts, adding captions, and trimming a long recording to 60 seconds are slow by hand.
+- Cloud AI editors do this, but they need the raw recording uploaded (about a gigabyte per 10 minutes) and a subscription paid in dollars by card. On Cameroonian mobile data, the upload alone is expensive.
+- Many of these creators use older laptops, and many tech creators use Linux, where the desktop AI editors (Descript, CapCut, Premiere Pro) don't run.
 - Auto-captions handle Pidgin, Camfranglais, and code-switched French/English badly.
 
-CapCut is free and already on their phones; Sabicut will not out-feature it. Sabicut competes where a phone app can't: **zero data cost, shared hardware, local languages, and facilitator-run sessions.**
+CapCut is free and on most phones; Sabicut will not out-feature it. Sabicut competes where cloud and phone apps can't: **no upload, no subscription, an old laptop is enough (Linux included), every edit is a plan file you can review, and local languages.**
 
-## 2. Positioning (existing tools checked 2026-11-02)
+## 2. Positioning (existing tools checked 2026-11-02 and 2026-11-07)
 
 | Tool | What it already does | Why Sabicut is still different |
 |---|---|---|
-| auto-editor (5.7k★, since 2020) | Cuts dead air by loudness or motion; exports to Kdenlive and Resolve | Single-user desktop tool; no styled captions; doesn't know about words or retakes |
-| CutScript (270★) | Edits video by editing its transcript; Electron + Python | Heavy runtime; single user; not built for low-spec hardware |
-| Kinocut (237★) | Local MCP video editor for AI agents; Shorts/Reels; JSON plan format named "Cutfile" | Python, built for agents and developers; shared mobile/web processing is not shipped yet |
-| OpenScrub, Cloak | Redact secrets and PII in screen recordings | Secret redaction is already solved, so it's dropped from Sabicut's scope |
+| auto-editor (5.7k★, since 2020) | Cuts dead air by loudness or motion; exports to Premiere, Resolve, Final Cut, Shotcut and Kdenlive | No captions; doesn't know about words, so it can't cut false starts or pick the best 60 s |
+| CutScript (270★) | Edits video by editing its transcript; Electron + Python | Heavy runtime; no styled vertical shorts; not built for low-spec hardware |
+| Kinocut (237★) | Local MCP video editor for AI agents; Shorts/Reels; JSON plan format named "Cutfile" | Python, built for agents and developers rather than creators |
+| Premiere Pro, Descript | Transcript-based editing and pause removal; Descript also captions and clips | Paid; no Linux version; Descript transcribes in its cloud |
+| CapCut, Captions, Submagic | Auto-captions, styles and templates on phone or web | Need internet for their AI features; paid tiers; English-first captions |
+| OpenScrub, Cloak | Redact secrets and PII in screen recordings | Already solved, so redaction stays out of Sabicut's scope |
 
-**Sabicut's position:** the only one that is (1) a **multi-user hub served over local Wi-Fi to phone browsers**, (2) a **single Rust binary** that runs on a weak laptop, and (3) built around **African-language captions**.
+**Sabicut's position:** offline from raw recording to captioned short, in one Rust binary that runs on an old laptop (Linux included), with a plan file you can review and edit, and captions aimed at African languages. It starts with tech and education creators: they record on laptops, often on Linux, and the owner is one of them.
 
 ## 3. Users
 
 | User | Device | How they use Sabicut |
 |---|---|---|
-| **Facilitator** (club lead, teacher, cyber café owner) | One laptop | Runs `sabicut hub`, shows the QR code, manages the queue, wipes the session |
-| **Phone-only creator** (student) | Phone browser | Joins the Wi-Fi, uploads clips, types a hook, downloads the short |
-| **Laptop creator** (me, DCT Lab) | Laptop | Command-line pipeline: analyze → plan → preview → render |
-| **Contributor** | Any | Adds Pidgin/French correction packs and style packs as plain TOML files |
+| **Tech or education creator** (first: me and DCT Lab; then GDGoC and OWASP Yaoundé members, and teachers recording lessons) | Laptop, often Linux; OBS for screen and webcam, or a phone for face clips | analyze → plan → review page → render; publishes to TikTok, Reels and Shorts |
+| **Other laptop creators** | Laptop | The same workflow, through the review page instead of the command line |
+| **Contributor** | Any | Adds Pidgin/French correction packs and caption styles as plain TOML files |
 
 ## 4. Goals and non-goals
 
 **Goals**
-1. Engine: raw clips → vertical 1080×1920 30 fps MP4 + cover JPG + SRT, **fully offline**, within the RAM budget.
+1. Engine: raw recordings → vertical 1080×1920 30 fps MP4 + cover JPG + SRT, **fully offline**, within the RAM budget.
 2. A hand-editable **edit plan** (`plan.toml`) with a **frozen, versioned schema**.
-3. Hub: a phone-browser upload → queue → download flow on one laptop, no internet.
+3. Creator workflow: a 10-minute recording becomes a short of 60 s or less, picked automatically, then checked and rendered from a local review page.
 
-**Non-goals (until after the pilot):** hosted SaaS, accounts, telemetry; a GUI timeline; MCP server or LLM planner; Tauri desktop app; native mobile app; secret redaction; rea reverse-engineering work; horizontal tutorial mode; sound effects, stickers, confetti.
+**Non-goals (until after the creator beta):** hosted SaaS, accounts, telemetry; a GUI timeline; the community hub (§11); MCP server or LLM planner; Tauri desktop app; native mobile app; secret redaction; rea reverse-engineering work; horizontal output; sound effects, stickers, confetti, B-roll.
 
 ## 5. The edit plan: `plan.toml` (schema v1, frozen at v0.1)
 
@@ -105,7 +108,7 @@ stroke = 10
 | F2 | `sabicut fix` | `fixes.toml` replacement rules, reapplied on every run |
 | F3 | `sabicut plan` | Rules: cut dead air and false starts (threshold configurable), crop to 9:16, punch-in zooms on keywords → `plan.toml` |
 | F4 | `sabicut preview --at 1.5,8,22` | PNG stills with a safe-zone guide, plus a contact sheet. Always runs before a full render |
-| F5 | `sabicut render` | One ffmpeg graph: frame-exact trims, short audio fades, concat, end card. Audio: denoise → high-pass → compressor → loudness normalization to −14 LUFS; AAC 160k 48 kHz; x264 CRF 20; fast-start. Also writes the SRT and the cover |
+| F5 | `sabicut render` | Frame-exact trims, short audio fades, concat. Each cut is decoded in turn and piped to one encoder, because a single ffmpeg graph peaked at 1.23 GB. Audio: denoise → high-pass → compressor → loudness normalization to −14 LUFS; AAC 160k 48 kHz; x264 CRF 20; fast-start. Also writes the SRT and the cover. The end card is deferred: schema v1 has no fields for its content |
 | F6 | Captions and hook | Word-by-word captions (active word gold with a pop, keywords always gold, auto line wrap, platform safe zones); hook text for the first 2 s |
 
 ### Day-one benchmark: transcription speed is the main risk
@@ -116,23 +119,18 @@ stroke = 10
 |---|---|---|
 | tiny, base, small | Wall-clock time, peak RSS, rough word error rate on 2 hand-checked minutes (English and French) | Transcribing 10 min takes ≤ 10 min **and** peak RSS < 1.5 GB |
 
-Pick the largest model that passes. Hub mode may use a smaller model than personal mode.
+Pick the largest model that passes. Quick drafts may use a smaller model.
 
-## 7. Hub v0.2
+## 7. Creator v0.2
 
 | ID | Feature | Notes |
 |---|---|---|
-| H1 | `sabicut hub` | axum server on the LAN interface only; prints the URL and a QR code; writes a printable QR poster PNG |
-| H2 | Phone upload page | Static page (SvelteKit static build or plain HTML; decided at v0.2), **≤ 100 KB on first load**; resumable chunked uploads that survive Wi-Fi drops |
-| H3 | Brief form | Hook text, keywords, language (EN / FR / Pidgin), style choice |
-| H4 | Job queue | One job at a time (4 CPUs); shows each phone its queue position and estimated wait |
-| H5 | Download | Final MP4 (sized for WhatsApp Status) + SRT; a per-job random token instead of accounts |
-| H6 | Facilitator view | Queue, disk usage, retry/cancel, **end session = wipe all uploads**; protected by a session PIN shown on the laptop |
-| H7 *(stretch)* | Review on the phone | Preview stills and tap-a-word transcript fixes before rendering |
+| C1 | Automatic length: `sabicut plan --max-duration 60` | Picks which kept sections go into the short. Rules-based and deterministic: keep whole sentences, prefer sentences with keywords and the opening line (the hook), keep the original order, never cut mid-word. Every dropped sentence is listed in the plan so it can be restored by hand. The LLM planner stays after the beta |
+| C2 | Local review page: `sabicut serve` | A page on `127.0.0.1` with the transcript and click-to-fix words (writes `fixes.toml`), the picked and dropped sections with one-click restore, preview stills with the safe-zone guide, and a render button with progress. **≤ 100 KB on first load**, embedded in the binary. Plain HTML or a SvelteKit static build, decided at v0.2 |
+| C3 | Recording guide | `docs/recording.md`: OBS settings (1080×1920 canvas, 30 fps, hardware H.264, 1-second keyframes, 48 kHz audio), phone settings, and the layout zones that the hook, captions and app buttons use |
+| C4 *(stretch)* | Caption styles | 2–3 named styles in TOML (colours, size, position), chosen with an optional `captions.style` field |
 
-**Hub security (non-negotiable):** bind to the LAN only; check uploads by magic bytes and size cap, and run an `ffprobe` check before any processing; random job tokens; prevent path traversal; limit request rate per device; make zero outbound network calls; wipe automatically at session end. Students may be minors, so the facilitator confirms consent before a session starts.
-
-**Wi-Fi:** v0.2 documents using the laptop's own hotspot (NetworkManager) or an existing router. Built-in hotspot control (`--hotspot`, reusing the omarchy-hotspot work) comes later.
+**Review page security (non-negotiable):** bind to `127.0.0.1` only; a random token in the page URL; read and write files only inside the project folder, with no path traversal; make zero outbound network calls; run one render at a time through the shared job lock.
 
 ## 8. Technical design
 
@@ -140,12 +138,12 @@ Crates are added only when they contain real code, so there are no placeholder c
 
 ```
 crates/
-  core/     plan types, schema v1, validation, rational time, timeline mapping
-  analyze/  whisper-rs, voice-activity detection, loudness
-  plan/     rules engine (dead air, false starts, zooms), fixes
-  overlay/  tiny-skia + cosmic-text, glyph cache, easing
-  render/   ffmpeg graph builder, caption-band pipe, preview stills
-  hub/      axum server, queue, uploads, static page
+  core/     plan types, schema v1, validation, rational time, timeline mapping, words.json, fixes
+  analyze/  whisper-rs, voice-activity detection
+  plan/     rules engine (dead air, false starts, zooms; length in v0.2)
+  overlay/  tiny-skia + rustybuzz, word cache, easing, SRT
+  render/   ffmpeg pipeline, caption-band pipe, preview stills
+  serve/    axum server and embedded review page (v0.2)
   cli/      clap entry point: `sabicut`
 spikes/     throwaway experiments (e.g. whisper-bench), not workspace members
 ```
@@ -153,11 +151,11 @@ spikes/     throwaway experiments (e.g. whisper-bench), not workspace members
 | Decision | Choice | Why |
 |---|---|---|
 | Video I/O | ffmpeg **binary as a subprocess** | Robust; no GPL linking; same approach as the proven Python pipeline |
-| Overlay drawing | tiny-skia + cosmic-text | Text shaping, emoji, and outlined text in pure Rust |
-| Overlay transport | Render only the **caption band** (≈1080×400 RGBA), placed with `overlay=x:y`; draw the hook, zooms, and end card only inside `enable='between(t,a,b)'` windows | About 5× fewer bytes than piping full frames |
+| Overlay drawing | tiny-skia + rustybuzz | Kerned, outlined text with accents. cosmic-text was measured and rejected: it grows the binary by 2.28 MB against 0.78 MB, and its system-font fallback breaks determinism |
+| Overlay transport | Render only the **caption band** (about 756×240 RGBA), placed with `overlay=x:y`; draw the hook only inside its frame window | Far fewer bytes than piping full frames |
 | Transcription | whisper-rs, CPU, quantized models | Offline; model size chosen by the benchmark |
-| Hub server | axum + static assets embedded in the binary | One file to copy onto a club laptop |
-| Encoding presets | `medium` for personal use, `veryfast` for hub mode | Hub throughput matters more than the last few percent of quality |
+| Review page server | axum, bound to `127.0.0.1`, with static assets embedded in the binary | One binary, nothing else to install |
+| Encoding presets | `medium` for final renders, `veryfast` for quick drafts | Drafts favour speed; finals favour quality |
 
 **Memory:** stream everything, with at most 2 overlay buffers in flight. Peak memory < 800 MB, excluding the Whisper model.
 **Testing:** golden tests on the plan → timeline mapping (exact frame counts), clamping edge cases, overlay PNGs at fixed timestamps, and SRT text. The final MP4 is **smoke-checked** (duration ±1 frame, stream properties, loudness ±1 LU), not byte-compared, because x264 output varies across builds and CPUs.
@@ -170,26 +168,27 @@ spikes/     throwaway experiments (e.g. whisper-bench), not workspace members
 | Engine | Peak memory during render | < 800 MB |
 | Engine | Cuts landing mid-word (manual review of 50 cuts) | < 5% |
 | Engine | Network calls during the default pipeline | 0 |
-| Hub | Throughput on the reference laptop (≤ 3 min raw per student) | ≥ 10 shorts/hour |
-| Hub | Phone page first load | ≤ 100 KB |
-| Hub | Upload after a Wi-Fi drop | Resumes, never restarts |
-| Pilot | Students leaving with a finished short | ≥ 80% of at least 10 |
+| Creator v0.2 | Automatic length: 10-minute recording → short of 60 s or less | Published without re-picking sections in at least 3 of 5 test recordings |
+| Creator v0.2 | Review page first load | ≤ 100 KB |
+| Creator v0.2 | My time from opening the review page to a rendered short (after `analyze`) | ≤ 5 min |
+| Beta | Creators other than me who publish a Sabicut short | ≥ 5 by 2026-12-07 |
 
-## 10. After the pilot (prioritized, no dates)
+## 10. After the creator beta (prioritized, no dates)
 
 1. **Pidgin and Camfranglais caption packs:** community TOML correction dictionaries, later fine-tuning; bilingual EN/FR caption tracks. This is the long-term moat.
-2. **Retake detection:** when a line is said several times, keep the best take, judged by transcript similarity, fewer fillers, and steadier audio.
-3. **Data-cost estimate:** show the file size and approximate data cost before sharing; WhatsApp Status and data-saver presets.
-4. **Approval contact sheet:** a ~200 KB image of key frames that a client or teammate can approve over WhatsApp before rendering.
-5. **Style from example:** extract cut rhythm, caption placement, and colours from a video you like. This analyzes the *output*, not anyone's software.
-6. **Agent layer:** an MCP server (rmcp) and an LLM planner that emits validated plan patches.
+2. **Tutorial mode:** in screen recordings, zoom where the cursor or the typing is, instead of the centre.
+3. **Retake detection:** when a line is said several times, keep the best take, judged by transcript similarity, fewer fillers, and steadier audio.
+4. **Style from example:** extract cut rhythm, caption placement, and colours from a video you like. This analyzes the *output*, not anyone's software.
+5. **Data-cost estimate:** show the file size and approximate data cost before sharing; WhatsApp Status and data-saver presets.
+6. **Agent layer:** an MCP server (rmcp) and an LLM planner that emits validated plan patches, including smarter length picking.
 7. **rea side quest:** observing outputs only, after a terms-of-service check. Never inspecting packages or models, and never on the critical path.
 
 ## 11. Possible futures (no commitment)
 
-- **Hub-in-a-box:** DevSafe sets up preconfigured mini-PCs or laptops for schools and clubs and charges for setup and training via Mobile Money, while the software stays open source.
-- A Tauri desktop app for facilitators.
-- A native Flutter companion app, only if browser uploads prove insufficient.
+- **Community hub** (the v0.3 plan): `sabicut serve` opened on a laptop's own Wi-Fi, so a club or class uploads from phone browsers and gets shorts back with zero data. It needs a job queue, resumable uploads, session PINs, an automatic wipe, and consent for minors' footage. Revisit after the creator beta.
+- **Hub-in-a-box:** DevSafe sets up preconfigured laptops for schools and clubs and charges for setup and training via Mobile Money, while the software stays open source.
+- **Desktop app:** Tauri wrapping the review page.
+- **Mobile:** a native Flutter app, only if phone-only creators ask for it.
 
 ## 12. Decisions
 
@@ -198,6 +197,7 @@ spikes/     throwaway experiments (e.g. whisper-bench), not workspace members
 | Name | **Sabicut**. Checked 2026-11-02: free on crates.io, npm, and PyPI; no GitHub repository or account; no product found on the web; no DNS records for .com/.app/.dev/.io. A Sabicut domain lapsed in 2023, so confirm with a registrar before buying |
 | Repository | `DCT-Berinyuy/sabicut`, public |
 | License | MIT/Apache-2.0 dual |
+| Audience | Laptop creators, starting with tech and education creators. Decided 2026-11-07; the community hub moved to §11 |
 | Orientation | Vertical first |
 | Plan file | `plan.toml`. Not "Cutfile", which Kinocut uses |
 | Gate | Replaced by the time-box in §0 |
@@ -206,9 +206,10 @@ spikes/     throwaway experiments (e.g. whisper-bench), not workspace members
 
 | Risk | Mitigation |
 |---|---|
-| A weak hub laptop is too slow for a whole class | Benchmark first; one job at a time; `veryfast` preset; smaller model in hub mode; cap raw footage per student |
-| Students' phones record HEVC or HDR (washed-out colours) | Decode with ffmpeg; tone-map HDR to SDR in the render graph; recommend 1080p recording |
-| Laptop hotspot capacity (often about 8–10 clients) | Cap upload size; stagger uploads through the queue; document the router option |
-| Privacy of minors' footage | LAN only, no accounts, automatic wipe, facilitator consent checklist |
+| Crowded creator market (CapCut, Descript, Captions, auto-editor) | Start with tech and education creators; compete on offline, free, old hardware, Linux and the plan file, not on feature count |
+| Automatic length picks the wrong parts | Explainable rules; every dropped sentence is listed in the plan and restorable in the review page; preview before render |
+| A slow laptop | Measured so far on a 2015 i7: the `small` model transcribes at about real time and a render peaks at 691 MB; smaller models and `veryfast` for drafts |
+| Phones record HEVC or HDR (washed-out colours) | Decode with ffmpeg; tone-map HDR to SDR in the render graph; recommend 1080p recording |
+| OBS recordings in odd sizes (e.g. a 900×1440 monitor capture) | The recording guide; render already crops to 9:16 and converts to a constant frame rate |
 | Transcription quality for Pidgin | Human fix step from day one; correction packs; fine-tuning later |
 | Scope creep | Non-goals in §4; kill/review rule in §0 |

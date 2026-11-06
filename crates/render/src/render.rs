@@ -54,15 +54,15 @@ pub const AUDIO_BITRATE: &str = "160k";
 /// inside a hook of the usual 2 s, after its entrance.
 pub const DEFAULT_COVER_SECONDS: f64 = 1.0;
 
-/// x264's speed preset: slower presets compress better. PRD §8: `medium` for personal
-/// use, `veryfast` for the hub, where throughput matters more.
+/// x264's speed preset: slower presets compress better. PRD §8: `medium` for final
+/// renders, `veryfast` for quick drafts, where speed matters more.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Preset {
     /// `ultrafast`
     Ultrafast,
     /// `superfast`
     Superfast,
-    /// `veryfast`: the hub default.
+    /// `veryfast`: for quick drafts.
     Veryfast,
     /// `faster`
     Faster,
