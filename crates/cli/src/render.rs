@@ -30,7 +30,7 @@ pub(crate) struct RenderArgs {
     /// Do not write a cover
     #[arg(long, conflicts_with_all = ["cover", "cover_at"])]
     no_cover: bool,
-    /// x264 speed preset: medium for personal use, veryfast on a hub
+    /// x264 speed preset: medium for final renders, veryfast for quick drafts
     #[arg(long, default_value_t = Preset::Medium, value_name = "PRESET")]
     preset: Preset,
 }

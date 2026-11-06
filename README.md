@@ -1,10 +1,10 @@
 # Sabicut
 
-**An offline video studio for communities without laptops or cheap data.**
+**An offline AI video editor for creators who record on a laptop.**
 
-A Rust engine turns raw phone clips into captioned vertical shorts. One laptop "hub"
-serves a whole club over its own Wi-Fi: students upload from their phone browsers and
-get finished videos back. No internet, no data cost, no app to install.
+A Rust engine turns raw recordings (phone clips, or OBS screen and webcam recordings)
+into captioned vertical shorts on your own laptop. No upload, no subscription, no
+internet. It starts with tech and education creators.
 
 *Sabi* is Pidgin for "to know / know-how".
 
@@ -16,8 +16,8 @@ into a captioned vertical short.
 | Phase | Window | Exit criterion |
 |---|---|---|
 | Engine v0.1 | 2026-11-02 → 2026-11-16 | One DCT Lab short made with Sabicut and published |
-| Hub v0.2 | 2026-11-16 → 2026-11-30 | With internet off, 5 phones upload clips over the hub's Wi-Fi and each gets back a finished short |
-| Pilot | by 2026-12-07 | One real club session in which at least 10 students each leave with a short |
+| Creator v0.2 | 2026-11-16 → 2026-11-30 | From a 10-minute recording, Sabicut picks a short of 60 s or less that I review in the local review page and publish without re-picking sections by hand |
+| Creator beta | by 2026-12-07 | At least 5 creators other than me each publish a short made with Sabicut |
 
 If a phase misses its exit criterion by more than a week, work stops for a review.
 
@@ -38,7 +38,8 @@ word-by-word captions, a hook and subtitles.
 | `sabicut render <plan.toml>` | Renders a 1080×1920 MP4 (frame-exact cuts, crop, zooms, HDR tone mapping, cleaned-up audio at −14 LUFS, word-by-word captions and the hook), a cover JPG and subtitles (SRT) |
 | `sabicut srt <plan.toml>` | Writes the plan's subtitles (SRT) without rendering |
 
-The Wi-Fi hub comes next. How rendering and previews work, including how zooms move, is
+Next (v0.2): automatic length (`sabicut plan --max-duration`) and a local review page
+(`sabicut serve`). How rendering and previews work, including how zooms move, is
 in [docs/render.md](docs/render.md); how captions, the hook and subtitles are laid out
 is in [docs/captions.md](docs/captions.md).
 The full plan is in the [product requirements document](docs/PRD.md).
